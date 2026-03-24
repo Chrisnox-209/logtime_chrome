@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "42 Logtime Dashboard",
+  "version": "1.0",
+  "description": "Chrome extension pour suivre ton Logtime, ton Wallet, tes évaluations et tes amis au cluster 42.",
+  "permissions": [
+    "storage",
+    "cookies",
+    "alarms"
+  ],
+  "host_permissions": [
+    "*://*.intra.42.fr/*",
+    "*://api.intra.42.fr/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "42 Dashboard",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
