@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "42 Logtime Dashboard",
+  "name": "42 Logtime Dashboard BÊTA",
   "version": "1.0",
-  "description": "Chrome extension pour suivre ton Logtime, ton Wallet, tes évaluations et tes amis au cluster 42.",
+  "description": "Chrome extension pour suivre ton Logtime, tes évaluations et tes amis au cluster 42. CETTE EXTENSION EST POUR LES TESTS BÊTA",
   "permissions": [
     "storage",
     "cookies",
