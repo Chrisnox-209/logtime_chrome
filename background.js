@@ -103,6 +103,10 @@ async function refreshAllData() {
     });
     const stats = await statsRes.json();
     
+    // Load old cache to fallback if API is rate limited
+    const currentCache = await chrome.storage.local.get(['cachedFriends']);
+    const oldFriendsStats = currentCache.cachedFriends || {};
+
     // 3. Update friends online count
     let onlineFriends = 0;
     const friendsStats = {};
@@ -110,11 +114,18 @@ async function refreshAllData() {
     if (settings.friendsList && settings.friendsList.length > 0) {
       for (const friend of settings.friendsList) {
         try {
+          // Sleep to respect 42 API rate limit (~2 req/s max)
+          await new Promise(r => setTimeout(r, 600));
+
           const friendLocsRes = await fetch(`https://api.intra.42.fr/v2/users/${friend}/locations?range[begin_at]=${start},${end}&per_page=100`, {
             headers: { 'Authorization': `Bearer ${currentToken}` }
           });
           if (!friendLocsRes.ok) {
-            console.warn(`Could not fetch locs for ${friend}`);
+            console.warn(`Could not fetch locs for ${friend}, fallback to cache`);
+            if (oldFriendsStats[friend]) {
+              friendsStats[friend] = oldFriendsStats[friend];
+              if (oldFriendsStats[friend].active) onlineFriends++;
+            }
             continue;
           }
           const friendLocs = await friendLocsRes.json();
@@ -123,6 +134,7 @@ async function refreshAllData() {
           // Récupération du profil de l'ami (pour la photo)
           let avatarUrl = null;
           try {
+            await new Promise(r => setTimeout(r, 600)); // Another sleep before the second request
             const friendProfileRes = await fetch(`https://api.intra.42.fr/v2/users/${friend}`, {
               headers: { 'Authorization': `Bearer ${currentToken}` }
             });
@@ -140,7 +152,13 @@ async function refreshAllData() {
             avatar: avatarUrl 
           };
           if (activeSession) onlineFriends++;
-        } catch(e) { console.warn("Error API friend", friend); }
+        } catch(e) { 
+          console.warn("Error API friend", friend); 
+          if (oldFriendsStats[friend]) {
+             friendsStats[friend] = oldFriendsStats[friend];
+             if (oldFriendsStats[friend].active) onlineFriends++;
+          }
+        }
       }
     }
 
