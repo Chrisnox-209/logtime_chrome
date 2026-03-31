@@ -111,7 +111,8 @@ async function refreshAllData() {
     // Refresh normal : juste le mois en cours
     startObj = new Date(now.getFullYear(), now.getMonth(), 1);
   }
-  const endObj = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  // Fin : On injecte demain (Now + 24h) pour s'assurer d'inclure toutes les sessions débutées aujourd'hui
+  const endObj = new Date(now.getTime() + 86400000);
   
   const start = startObj.toISOString();
   const end = endObj.toISOString();
@@ -186,58 +187,82 @@ async function refreshAllData() {
     // 3. Update friends online count
     let onlineFriends = 0;
     const friendsStats = {};
+    if (settings.friendsList) {
+      settings.friendsList.forEach(f => {
+        if (oldFriendsStats[f]) friendsStats[f] = oldFriendsStats[f];
+      });
+    }
 
     if (settings.friendsList && settings.friendsList.length > 0) {
       for (const friend of settings.friendsList) {
+        // Indicate to UI that we are refreshing this specific friend
+        friendsStats[friend] = { ...(friendsStats[friend] || {}), refreshing: true };
+        await chrome.storage.local.set({ cachedFriends: friendsStats });
+
         try {
-          // Sleep to respect 42 API rate limit (~2 req/s max)
+          // Sleep to respect 42 API rate limit (~2 req/s max, we do exactly 2 reqs per 0.6s)
           await new Promise(r => setTimeout(r, 600));
 
-          const friendLocsRes = await fetch(`https://api.intra.42.fr/v2/users/${friend}/locations?range[begin_at]=${start},${end}&per_page=100`, {
-            headers: { 'Authorization': `Bearer ${currentToken}` }
-          });
-          if (!friendLocsRes.ok) {
+          // Fire both requests concurrently
+          const [friendLocsRes, friendProfileRes] = await Promise.all([
+            fetch(`https://api.intra.42.fr/v2/users/${friend}/locations?range[begin_at]=${start},${end}&per_page=100`, {
+              headers: { 'Authorization': `Bearer ${currentToken}` }
+            }).catch(e => null),
+            fetch(`https://api.intra.42.fr/v2/users/${friend}`, {
+              headers: { 'Authorization': `Bearer ${currentToken}` }
+            }).catch(e => null)
+          ]);
+
+          if (!friendLocsRes || !friendLocsRes.ok) {
             console.warn(`Could not fetch locs for ${friend}, fallback to cache`);
             if (oldFriendsStats[friend]) {
               friendsStats[friend] = oldFriendsStats[friend];
               if (oldFriendsStats[friend].active) onlineFriends++;
+            } else {
+              delete friendsStats[friend];
             }
+            await chrome.storage.local.set({ cachedFriends: friendsStats });
             continue;
           }
+          
           const friendLocs = await friendLocsRes.json();
+          let friendTotalMs = 0;
+          if (Array.isArray(friendLocs)) {
+            friendLocs.forEach(l => {
+              friendTotalMs += ((l.end_at ? new Date(l.end_at) : new Date()) - new Date(l.begin_at));
+            });
+          }
           const activeSession = Array.isArray(friendLocs) && friendLocs.find(l => l.end_at === null);
           
           // Récupération du profil de l'ami (pour la photo)
           let avatarUrl = null;
-          try {
-            await new Promise(r => setTimeout(r, 600)); // Another sleep before the second request
-            const friendProfileRes = await fetch(`https://api.intra.42.fr/v2/users/${friend}`, {
-              headers: { 'Authorization': `Bearer ${currentToken}` }
-            });
-            if (!friendProfileRes.ok) {
-              console.warn(`Could not fetch profile for ${friend}: ${friendProfileRes.status} ${await friendProfileRes.text()}`);
-            } else {
+          if (friendProfileRes && friendProfileRes.ok) {
+            try {
               const friendProfile = await friendProfileRes.json();
               if (friendProfile && friendProfile.image && friendProfile.image.versions && friendProfile.image.versions.small) {
                 avatarUrl = friendProfile.image.versions.small;
               } else if (friendProfile && friendProfile.image && friendProfile.image.link) {
                 avatarUrl = friendProfile.image.link;
               }
-            }
-          } catch(e) { console.warn("Error fetching friend profile info", friend); }
+            } catch(e) { console.warn("Error parsing profile info", friend); }
+          }
 
           friendsStats[friend] = { 
             active: activeSession ? activeSession.host : null, 
-            locs: friendLocs,
+            totalMs: friendTotalMs,
             avatar: avatarUrl 
           };
           if (activeSession) onlineFriends++;
+          await chrome.storage.local.set({ cachedFriends: friendsStats });
         } catch(e) { 
           console.warn("Error API friend", friend); 
           if (oldFriendsStats[friend]) {
              friendsStats[friend] = oldFriendsStats[friend];
              if (oldFriendsStats[friend].active) onlineFriends++;
+          } else {
+             delete friendsStats[friend];
           }
+          await chrome.storage.local.set({ cachedFriends: friendsStats });
         }
       }
     }

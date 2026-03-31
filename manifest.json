@@ -5,11 +5,10 @@
   "description": "Chrome extension pour suivre ton Logtime, tes évaluations et tes amis au cluster 42. CETTE EXTENSION EST POUR LES TESTS BÊTA",
   "permissions": [
     "storage",
-    "cookies",
+    "unlimitedStorage",
     "alarms"
   ],
   "host_permissions": [
-    "*://*.intra.42.fr/*",
     "*://api.intra.42.fr/*"
   ],
   "action": {

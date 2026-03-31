@@ -42,6 +42,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("friendsTitle").textContent = "FRIENDS STATUS";
   });
 
+  // Listen for progressive friend updates
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.cachedFriends) {
+      renderFriends(changes.cachedFriends.newValue);
+    }
+  });
+
   await loadData();
 });
 
@@ -127,9 +134,6 @@ function renderEverything(data) {
 
   // Render Friends
   renderFriends(data.cachedFriends || {});
-
-  // Fetch Defenses (Live, via cookie in popup)
-  fetchDefenses(data.username);
 }
 
 function calculateDailyTarget(targetHours, currentMs, workableDays) {
@@ -222,8 +226,10 @@ function renderFriends(friendsStats) {
 
   friendsKeys.forEach(login => {
     const f = friendsStats[login];
-    let totalMs = 0;
-    if (f.locs && Array.isArray(f.locs)) {
+    
+    // Support either the new totalMs or the old locs array
+    let totalMs = f.totalMs || 0;
+    if (totalMs === 0 && f.locs && Array.isArray(f.locs)) {
       f.locs.forEach(l => {
         totalMs += ((l.end_at ? new Date(l.end_at) : new Date()) - new Date(l.begin_at));
       });
@@ -250,7 +256,9 @@ function renderFriends(friendsStats) {
 
     const st = document.createElement("div");
     st.className = "friend-status";
-    if (f.active) {
+    if (f.refreshing) {
+      st.innerHTML = `<div class="status-offline" style="color:#f39c12; font-size:12px;">🔄...</div>`;
+    } else if (f.active) {
       st.innerHTML = `<div class="status-online">🟢</div><div style="font-size:9px; color:#2ed573;">${f.active}</div>`;
     } else {
       st.innerHTML = `<div class="status-offline">🔴 Off</div>`;
@@ -263,60 +271,3 @@ function renderFriends(friendsStats) {
   });
 }
 
-function fetchDefenses(username) {
-  const box = document.getElementById("defensesBox");
-  
-  // 1. Ask background script for the valid oauth token OR grab the cookie directly via chrome.cookies.
-  // Actually, to use chrome.cookies we MUST have `host_permissions: ["*://*.intra.42.fr/*"]`
-  // And call:
-  chrome.cookies.get({ url: "https://intra.42.fr", name: "_intra_42_session_production" }, async (cookie) => {
-    if (!cookie) {
-      box.innerHTML = `<div class="defense-item defense-offline">⚠️ Non connecté à l'Intra sur ce navigateur. <br><a href="https://intra.42.fr" target="_blank" style="color:#54a0ff">Se connecter →</a></div>`;
-      return;
-    }
-
-    // Now get the Token from Background
-    chrome.runtime.sendMessage({action: "getToken"}, async (response) => {
-      if (!response || !response.token) return;
-
-      try {
-        const url = `https://api.intra.42.fr/v2/users/${username}/scale_teams?filter%5Bfuture%5D=true`;
-        const res = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${response.token}`,
-            // In a Chrome Extension fetch(), if credentials:'include' it should send cookies automatically for the same domain if host permissions allow it, BUT since we fetch from api.intra.42.fr and cookie is on intra.42.fr, we must inject it explicitly.
-            'Cookie': `_intra_42_session_production=${cookie.value}`
-          }
-        });
-
-        if (!res.ok) throw new Error("Erreur res");
-        const scales = await res.json();
-        
-        box.innerHTML = "";
-        if (!Array.isArray(scales) || scales.length === 0) {
-          box.innerHTML = `<div class="defense-item">Aucune défense prévue</div>`;
-          return;
-        }
-
-        scales.slice(0, 3).forEach(scale => {
-          const date = new Date(scale.begin_at);
-          const h = date.getHours().toString().padStart(2, '0');
-          const m = date.getMinutes().toString().padStart(2, '0');
-          const d = date.getDate().toString().padStart(2, '0');
-          const mo = (date.getMonth() + 1).toString().padStart(2, '0');
-
-          const isCorrector = (scale.corrector && scale.corrector.login === username);
-          const typeStr = isCorrector ? "💪 Corriger" : "🎓 Être corrigé";
-          const dClass = isCorrector ? "defense-corriger" : "defense-corrige";
-
-          let projectName = (scale.scale && scale.scale.name) ? scale.scale.name : "Projet";
-          if (scale.team && scale.team.name && projectName === "Projet") projectName = scale.team.name;
-
-          box.innerHTML += `<div class="defense-item ${dClass}">${d}/${mo} à ${h}h${m} - ${typeStr} (${projectName})</div>`;
-        });
-      } catch (err) {
-        box.innerHTML = `<div class="defense-item" style="color:red;">Erreur de chargement. Le cookie a peut-être expiré.</div>`;
-      }
-    });
-  });
-}
