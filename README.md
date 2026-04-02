@@ -1,56 +1,83 @@
-# 42 Logtime Dashboard - Chrome Extension 🚀
+# 🚀 Logtime 42 - Chrome Extension
 
-Une extension Chrome de nouvelle génération, ultra-rapide et optimisée, pour suivre en temps réel ton **Logtime**, ton **Wallet** et voir le statut détaillé de **tes amis au cluster 42**, ainsi que l'occupation des postes sur la **Matrix**.
+Une extension Chrome moderne, rapide et complète pour les étudiants de l'école 42. Suivez votre **Logtime**, gérez vos **objectifs**, surveillez le statut de vos **amis** et visualisez l'occupation des clusters en un clin d'œil.
 
 ![Logo](icon128.png)
 
 ---
 
-## ✨ Fonctionnalités Principales
-
-- **🕒 Logtime Dynamique :** Visualise ton logtime du jour et du mois, avec la gestion des "Gift days" calculant un ratio mensuel précis (ex: 154h par défaut).
-- **🎯 Cible Quotidienne Intelligente :** L'extension prend en compte la configuration de tes "jours ouvrés" pour t'indiquer exactement la charge de travail (Cible/J) qu'il te reste à effectuer chaque jour.
-- **🤝 Suivi des Amis & Chargement Progressif ⚡ :** 
-  - Statut en ligne/hors-ligne (avec la place précise `e1m1...`), logtime mensuel et photos de profil (Avatars) récupérés via l'API.
-  - **Ultra-rapide :** Le chargement se fait _ami par ami_ visuellement (tu verras une icône `🔄...` pendant le rafraîchissement) à la vitesse maximale autorisée par l'API (2 requêtes simultanées toutes les 0,6 secondes), optimisant drastiquement le temps d'attente de la liste.
-- **🌐 Intégration Matrix :** Suivi automatique du temps d'utilisation des postes du cluster et intégration visuelle avec la page Matrix de 42 Lyon pour voir facilement les postes libres ou occupés.
-- **📊 Calendrier Heatmap :** Un calendrier thermique affichant ton temps de travail par jour pour le mois en cours, visualisant ta productivité d'un coup d'oeil.
-- **💾 Mémoire Optimisée :** Le stockage exploite la permission `unlimitedStorage` tout en limitant l'empreinte de la mise en cache (compression logicielle des durées), évitant la saturation de la mémoire interne de Chrome.
-
----
-
-## ⚡ Installation (Mode Développeur)
-
-Cette extension est distribuée pour l'instant de manière locale (sans passer par le Chrome Web Store), suis ces étapes :
-
-1. Ouvre Chrome (ou Brave/Edge/Arc).
-2. Va sur la page de gestion des extensions : `chrome://extensions/`
-3. Active le **Mode développeur** (interrupteur en haut à droite).
-4. Clique sur **Charger l'extension non empaquetée** (Load unpacked).
-5. Sélectionne le dossier de l'extension.
-6. C'est fait ! N'oublie pas d'épingler l'extension "42 Dashboard" à ta barre de tâches avec l'icône de puzzle.
+## 📋 Sommaire
+1. [Installation](#️-installation-mode-développeur)
+2. [Configuration API](#-configuration-de-lapi-intra-42)
+3. [Fonctionnalités](#-fonctionnalités)
+    * [Logtime & Objectifs](#️-suivi-du-logtime--objectifs)
+    * [Planning](#-planning-personnalisé)
+    * [Amis & Notifications](#-gestion-des-amis--notifications)
+    * [Visualisation & Outils](#-visualisation--outils)
+4. [Confidentialité](#-confidentialité)
 
 ---
 
-## 🔑 Configuration & Clé d'API 42
+## 🛠️ Installation (Mode Développeur)
 
-Pour que l'extension accède à tes données publiques sur l'Intra de 42, tu dois lui assigner une application OAuth :
+Cette extension n'est pas encore sur le Chrome Web Store. Suivez ces étapes pour l'installer manuellement :
 
-1. Rends-toi sur 👉 [https://profile.intra.42.fr/oauth/applications/new](https://profile.intra.42.fr/oauth/applications/new)
-2. Remplis le formulaire de création :
-   - **Name :** Chrome Logtime Dashboard (ou comme tu veux)
-   - **Redirect URI :** `http://localhost`
-   - **Scopes :** Coche uniquement `public`
-3. Clique sur Submit.
-4. Fais un **Clic-droit** sur l'icône de l'extension (la jauge circulaire) -> Clique sur **Paramètres / Options**.
-5. Rentre ton **Login 42**, l'**UID** (Client ID) et le **Secret** qui viennent de t'être générés. Configures-y également tes Gift Days, tes jours ouvrés et les logins de la liste d'amis que tu souhaites suivre.
-6. Clique sur **Sauvegarder** (Le badge "Paramètres validés" s'assurera que l'API OAuth communique correctement !).
+1.  **Cloner le dépôt** :
+    ```bash
+    git clone https://github.com/elarue/logtime42.git
+    ```
+2.  **Accéder aux extensions** : Ouvrez Chrome et allez sur `chrome://extensions/`.
+3.  **Activer le mode développeur** : Basculez l'interrupteur en haut à droite.
+4.  **Charger l'extension** : Cliquez sur **"Charger l'extension non empaquetée"** (Load unpacked) et sélectionnez le dossier `logtime_chrome-main`.
+5.  **Épingler l'extension** : N'oubliez pas d'épingler "Logtime 42" à votre barre d'outils pour un accès rapide.
 
 ---
 
-## 🔒 Confidentialité & Sécurité
+## 🔑 Configuration de l'API Intra 42
 
-- **Totalement Privé :** Toutes tes données (logins, amis, paramètres API, statistiques) sont stockées dans le coffre-fort local et sécurisé de ton navigateur (`chrome.storage.local`).
-- **Aucun Tiers :** Aucun serveur ou outil tiers ne collecte ton activité, l'extension tourne 100% en local et contacte uniquement l'API officielle de 42.
+Pour fonctionner, l'extension nécessite une application OAuth sur l'Intra de 42 :
 
-*(Créée par [elarue] / Convertie et Optimisée pour Google Chrome)*
+1.  Rendez-vous sur [https://profile.intra.42.fr/oauth/applications/new](https://profile.intra.42.fr/oauth/applications/new).
+2.  Remplissez les champs comme suit :
+    *   **Name** : `logtime42`
+    *   **Description** : `Extension pour le suivi du logtime et des amis.`
+    *   **Redirect URI** : `https://localhost`
+3.  Cliquez sur **Submit**.
+4.  Copiez votre **UID** (Client ID) et votre **Secret**.
+5.  Ouvrez les **Options** de l'extension (clic-droit sur l'icône -> Options) et renseignez :
+    *   Votre **Login 42**.
+    *   L'**UID** et le **Secret** générés.
+6.  Cliquez sur **Sauvegarder** pour valider la connexion.
+
+---
+
+## ✨ Fonctionnalités
+
+### ⏱️ Suivi du Logtime & Objectifs
+*   **Dashbord en temps réel** : Visualisez votre logtime du jour et du mois.
+*   **Cible Quotidienne** : Calcul précis des heures restantes par jour en fonction de votre planning.
+*   **Gift Days** : Déduisez des jours d'objectif (vacances, événements) pour ajuster votre barre de progression.
+*   **Freeze Days** : Ajoutez des jours de bonus à votre calcul de Blackhole pour plus de précision.
+
+### 📅 Planning Personnalisé
+*   Configurez votre **Weekly Schedule** (jours travaillés) pour que l'extension adapte automatiquement votre objectif quotidien. Plus besoin de calculer de tête !
+
+### 👥 Gestion des Amis & Notifications
+*   **Friends List** : Suivez le statut (en ligne/hors-ligne) et la position exacte (ex: `z3r12p4`) de vos amis.
+*   **Notifications 🔔** : Activez la cloche pour être prévenu instantanément dès qu'un ami se connecte.
+*   **Logtime des Amis** : Gardez un œil sur la progression mensuelle de vos camarades.
+
+### 📊 Visualisation & Outils
+*   **Calendar Heatmap** : Une vue thermique pour visualiser votre productivité sur le mois.
+*   **Matrix View** : Vérifiez l'occupation des postes dans les clusters sans quitter l'onglet actuel.
+*   **Project Tracker** : Affiche votre projet en cours et le temps écoulé depuis le début de la session.
+*   **Thème Coalition** : L'interface s'adapte automatiquement aux couleurs de votre coalition (Water, Fire, Earth, Air.).
+
+---
+
+## 🛡️ Confidentialité
+Toutes vos données (clés API, login, amis) sont stockées **localement** dans votre navigateur via `chrome.storage.local`. Aucune donnée n'est envoyée à un serveur tiers, à l'exception des requêtes directes à l'API officielle de 42.
+
+---
+
+*Développé par [elarue] pour la communauté 42.*
