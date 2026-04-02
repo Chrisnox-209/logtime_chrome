@@ -55,13 +55,13 @@
     }
   },
   "notLoggedIn": {
-    "message": "Non connecté à Intra"
+    "message": "Configuration API requise"
   },
   "logIn": {
-    "message": "➔ Se connecter"
+    "message": "➔ Synchroniser"
   },
   "connecting": {
-    "message": "Connexion..."
+    "message": "Vérification..."
   },
   "tooltipMatrix": {
     "message": "Matrix"
@@ -131,7 +131,7 @@
     "message": "L'extension doit être rechargée dans chrome://extensions !"
   },
   "errorOAuth": {
-    "message": "Erreur de connexion OAuth"
+    "message": "Erreur de configuration API"
   },
   "optionsNotifications": {
     "message": "🔔 Notifications"
@@ -163,11 +163,5 @@
   },
   "optionsClientSecret": {
     "message": "Client Secret"
-  },
-  "optionsAPIHint": {
-    "message": "Crée ton app sur Intra > Settings > Apps. Redirect URI : $URL$",
-    "placeholders": {
-      "url": { "content": "$1" }
-    }
   }
 }

@@ -46,141 +46,97 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function handleLogin() {
-  const { clientId, clientSecret } = await chrome.storage.local.get(['clientId', 'clientSecret']);
-  if (!clientId || !clientSecret) {
-    return { status: "error", error: "Veuillez configurer votre UID et Secret dans les options de l'extension." };
+  const { clientId, clientSecret, username } = await chrome.storage.local.get(['clientId', 'clientSecret', 'username']);
+  if (!clientId || !clientSecret || !username) {
+    return { status: "error", error: "Veuillez configurer votre Login, UID et Secret dans les options." };
   }
 
-  const redirectUrl = chrome.identity.getRedirectURL();
-  const authUrl = `https://api.intra.42.fr/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUrl)}&response_type=code&scope=public`;
+  try {
+    // 1. Get Access Token via client_credentials
+    const res = await fetch('https://api.intra.42.fr/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'client_credentials',
+        client_id: clientId,
+        client_secret: clientSecret
+      })
+    });
 
-  return new Promise((resolve) => {
-    chrome.identity.launchWebAuthFlow(
-      { url: authUrl, interactive: true },
-      async (callbackUrl) => {
-        if (chrome.runtime.lastError || !callbackUrl) {
-          console.error("Auth Error:", chrome.runtime.lastError);
-          resolve({ status: "error", error: chrome.runtime.lastError ? chrome.runtime.lastError.message : "Auth cancelled" });
-          return;
-        }
+    if (!res.ok) throw new Error("Identifiants API invalides (UID/Secret)");
+    const data = await res.json();
 
-        const urlParams = new URLSearchParams(new URL(callbackUrl).search);
-        const code = urlParams.get("code");
+    const expire = (Date.now() / 1000) + data.expires_in - 60;
+    await chrome.storage.local.set({
+      accessToken: data.access_token,
+      refreshToken: null, // No refresh token in client_credentials
+      tokenExpire: expire
+    });
 
-        if (!code) {
-          resolve({ status: "error", error: "No code returned" });
-          return;
-        }
+    // 2. Initial fetch to validate the target user and get avatar/campus
+    const userRes = await fetch(`https://api.intra.42.fr/v2/users/${username}`, {
+      headers: { 'Authorization': `Bearer ${data.access_token}` }
+    });
 
-        try {
-          const res = await fetch('https://api.intra.42.fr/oauth/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              grant_type: 'authorization_code',
-              client_id: clientId,
-              client_secret: clientSecret,
-              code: code,
-              redirect_uri: redirectUrl
-            })
-          });
-
-          if (!res.ok) throw new Error("Failed to exchange code for token: " + await res.text());
-          const data = await res.json();
-
-          const expire = (Date.now() / 1000) + data.expires_in - 60;
-          await chrome.storage.local.set({
-            accessToken: data.access_token,
-            refreshToken: data.refresh_token,
-            tokenExpire: expire
-          });
-
-          // Retrieve the target login: from storage (manual) or from /v2/me (auto)
-          const localSettings = await chrome.storage.local.get(['username']);
-          let targetLogin = localSettings.username;
-          let userAvatar = null;
-          let campusName = '';
-
-          // Fetch the /v2/me profile of the AUTHENTICATED user to get avatar/campus
-          // (Even if we use a different username for logtime, we fetch the current token's owner info)
-          try {
-            const meRes = await fetch('https://api.intra.42.fr/v2/me', {
-              headers: { 'Authorization': `Bearer ${data.access_token}` }
-            });
-            if (meRes.ok) {
-              const meData = await meRes.json();
-              
-              // If no manual username, use the one from Intra
-              if (!targetLogin || targetLogin.trim() === "") {
-                targetLogin = meData.login;
-                await chrome.storage.local.set({ username: targetLogin });
-              }
-
-              // Extract avatar and campus from the token owner
-              if (meData.image && meData.image.versions && meData.image.versions.small) {
-                userAvatar = meData.image.versions.small;
-              } else if (meData.image && meData.image.link) {
-                userAvatar = meData.image.link;
-              }
-              if (meData.campus && Array.isArray(meData.campus) && meData.campus.length > 0) {
-                campusName = meData.campus[0].name || '';
-              }
-              
-              await chrome.storage.local.set({ userAvatar, userCampus: campusName });
-            }
-          } catch (meErr) {
-            console.error("Failed to fetch /v2/me during login:", meErr);
-          }
-
-          await refreshAllData();
-          resolve({ status: "success" });
-        } catch (e) {
-          console.error("OAuth Error:", e);
-          resolve({ status: "error", error: e.message });
-        }
+    if (userRes.ok) {
+      const userData = await userRes.json();
+      
+      // Store user avatar and campus
+      let userAvatar = null;
+      if (userData.image && userData.image.versions && userData.image.versions.small) {
+        userAvatar = userData.image.versions.small;
+      } else if (userData.image && userData.image.link) {
+        userAvatar = userData.image.link;
       }
-    );
-  });
+
+      let campusName = '';
+      if (userData.campus && Array.isArray(userData.campus) && userData.campus.length > 0) {
+        campusName = userData.campus[0].name || '';
+      }
+
+      await chrome.storage.local.set({ userAvatar, userCampus: campusName });
+    } else {
+      throw new Error(`Utilisateur '${username}' introuvable.`);
+    }
+
+    await refreshAllData();
+    return { status: "success" };
+  } catch (e) {
+    console.error("Auth Error:", e);
+    return { status: "error", error: e.message };
+  }
 }
 
 async function getValidToken() {
-  const data = await chrome.storage.local.get(['accessToken', 'refreshToken', 'tokenExpire']);
+  const data = await chrome.storage.local.get(['accessToken', 'tokenExpire', 'clientId', 'clientSecret']);
   
   if (data.accessToken && data.tokenExpire > (Date.now() / 1000)) {
     return data.accessToken;
   }
 
-  if (data.refreshToken) {
-    const { clientId, clientSecret } = await chrome.storage.local.get(['clientId', 'clientSecret']);
-    if (!clientId || !clientSecret) return null;
-
+  if (data.clientId && data.clientSecret) {
     try {
       const res = await fetch('https://api.intra.42.fr/oauth/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          grant_type: 'refresh_token',
-          client_id: clientId,
-          client_secret: clientSecret,
-          refresh_token: data.refreshToken
+          grant_type: 'client_credentials',
+          client_id: data.clientId,
+          client_secret: data.clientSecret
         })
       });
 
-      if (res.ok) {
-        const tokenData = await res.json();
-        const expire = (Date.now() / 1000) + tokenData.expires_in - 60;
-        await chrome.storage.local.set({
-          accessToken: tokenData.access_token,
-          refreshToken: tokenData.refresh_token,
-          tokenExpire: expire
-        });
-        return tokenData.access_token;
-      } else {
-        console.warn("Refresh token failed, user must log in again.");
-        // We could clear auth data here
-      }
+      if (!res.ok) throw new Error("Auth failed");
+      const resData = await res.json();
+      const expire = (Date.now() / 1000) + resData.expires_in - 60;
+      
+      await chrome.storage.local.set({
+        accessToken: resData.access_token,
+        tokenExpire: expire
+      });
+      return resData.access_token;
     } catch(e) {
-      console.error("Token refresh request failed", e);
+      console.error("Token fetch failed", e);
     }
   }
   

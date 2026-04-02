@@ -204,10 +204,6 @@ function restoreOptions() {
     clientId: '',
     clientSecret: ''
   }, (items) => {
-    // Show redirect URI
-    const redirectUrl = chrome.identity.getRedirectURL();
-    document.getElementById('apiHint').textContent = t('optionsAPIHint', [redirectUrl]);
-
     document.getElementById('usernameInput').value = items.username || '';
     document.getElementById('clientId').value = items.clientId || '';
     document.getElementById('clientSecret').value = items.clientSecret || '';
