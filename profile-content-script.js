@@ -1,5 +1,5 @@
 // profile-content-script.js
-// Injects monthly logtime totals & Friends card on https://profile.intra.42.fr/
+// Injects monthly logtime totals & Flippable Friends card on https://profile.intra.42.fr/
 
 (function () {
   "use strict";
@@ -14,7 +14,6 @@
   /** Parse an "Xh Ym" or HH:MM:SS logtime string into total minutes. */
   function parseLogTime(str) {
     if (!str) return 0;
-    // "5:23:11" format from locations_stats.json
     const parts = str.split(":");
     if (parts.length === 3) {
       return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) + parseInt(parts[2], 10) / 60;
@@ -22,7 +21,6 @@
     return 0;
   }
 
-  // Map short month → index (0‑based)
   const MONTH_MAP = {
     Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
     Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
@@ -30,116 +28,259 @@
 
   // ─── 1. Monthly Logtime Totals ───────────────────────────────────────────
   function getProfileUserName() {
-    // On own profile (/) or /users/<login>
     const path = window.location.pathname;
     if (path.startsWith("/users/")) {
       return path.split("/")[2];
     }
-    // Own profile: read from the top-bar login span
     const loginSpan = document.querySelector("span[data-login]");
     if (loginSpan) return loginSpan.getAttribute("data-login");
     return null;
   }
 
-  /**
-   * Find all month header <th> inside the Logtime card and annotate
-   * them with "(XXhYY)" totals fetched from local storage (calculated by background.js).
-   */
   function injectMonthlyTotals() {
     chrome.storage.local.get(["monthlyLogtime", "username"], function (data) {
       const sumsPerMonth = data.monthlyLogtime || {};
       const ownLogin = data.username;
       const currentProfileLogin = getProfileUserName();
 
-      // Only inject if viewing own profile
       if (!ownLogin || !currentProfileLogin || ownLogin !== currentProfileLogin) {
         return;
       }
       
-      // Find the "Logtime" card title
       const titleDivs = document.querySelectorAll(".font-bold.text-black.uppercase.text-sm");
       let logtimeCard = null;
       titleDivs.forEach(function (el) {
         if (el.textContent.trim().toLowerCase() === "logtime") {
-          // Walk up to the card root
           logtimeCard = el.closest(".bg-white") || el.closest("[class*='bg-white']");
         }
       });
       if (!logtimeCard) return;
 
-      // Grab month headers
       const monthHeaders = logtimeCard.querySelectorAll("th[colspan='7']");
       if (!monthHeaders.length) return;
 
       monthHeaders.forEach(function (th) {
-        // Get month name, handling cases where we've already modified it
-        // The original text is just "Jan", "Feb", etc.
         const originalText = th.getAttribute("data-original-month") || th.textContent.trim().split(" ")[0];
         if (!th.hasAttribute("data-original-month")) {
           th.setAttribute("data-original-month", originalText);
         }
-
         const totalMins = sumsPerMonth[originalText] || 0;
-        
-        // Update header: "Jan (50h38)"
         th.innerHTML = `${originalText} <span style="font-weight: 400; font-size: 0.85em; margin-left: 5px; color: #00868a; opacity: 0.8;">(${minutesToHM(totalMins)})</span>`;
       });
     });
   }
 
-  // ─── 2. Friends Card ───────────────────────────────────────────────────────
+  // ─── 2. Friends Card (Flippable) ──────────────────────────────────────────
   function injectFriendsCard() {
-    chrome.storage.local.get(["cachedFriends", "friendsList"], function (data) {
+    chrome.storage.local.get(["cachedFriends", "friendsList", "monthlyLogtime", "username", "cachedStats", "userAvatar"], function (data) {
       const friendsList = data.friendsList || [];
       const friendsStats = data.cachedFriends || {};
+      const ownLogin = data.username;
+      const ownStats = data.cachedStats || {};
+      const ownAvatar = data.userAvatar || "";
+      
+      const now = new Date();
+      const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const currentMonthLabel = MONTH_NAMES[now.getMonth()];
+      const ownLogtimeMins = (data.monthlyLogtime || {})[currentMonthLabel] || 0;
+      const ownLogtimeMs = ownLogtimeMins * 60000;
+
+      let ownLevel = 0;
+      if (ownStats.cursus_users) {
+        const cursus = ownStats.cursus_users.find(cu => cu.cursus.id === 21 || cu.cursus.name === "42cursus");
+        if (cursus) ownLevel = cursus.level;
+      }
+
       if (friendsList.length === 0 && Object.keys(friendsStats).length === 0) return;
 
-      // Find the "Last achievements" card to place Friends next to it
       const titleDivs = document.querySelectorAll(".font-bold.text-black.uppercase.text-sm");
       let achievementsCard = null;
       titleDivs.forEach(function (el) {
         if (el.textContent.trim().toLowerCase() === "last achievements") {
-          achievementsCard = el.closest(".bg-white.md\\:h-96") || el.closest("[class*='bg-white']");
+          achievementsCard = el.closest(".bg-white") || el.closest("[class*='bg-white']");
         }
       });
       if (!achievementsCard) return;
-      // Prevent double-injection
       if (document.getElementById("logtime42-friends-card")) return;
 
-      // ── Build the card ──
       const card = document.createElement("div");
       card.id = "logtime42-friends-card";
-      card.className = achievementsCard.className; // clone styling classes
-      card.style.overflow = "hidden";
+      card.className = achievementsCard.className + " lt42-flip-card";
+      card.style.overflow = "visible";
+      card.style.padding = "0";
 
-      // Inner wrapper matching the Intra card structure
-      const inner = document.createElement("div");
-      inner.className = "flex flex-col w-full h-full";
+      const innerFlipper = document.createElement("div");
+      innerFlipper.className = "lt42-flip-card-inner";
+      card.appendChild(innerFlipper);
 
-      // Title bar
+      // Click listener moved to specific buttons
+
+      // ── FRONT SIDE ──
+      const front = document.createElement("div");
+      front.className = "lt42-flip-card-front p-6 flex flex-col w-full h-full bg-white md:drop-shadow-md md:rounded-lg";
+      innerFlipper.appendChild(front);
+
+      // ── BACK SIDE ──
+      const back = document.createElement("div");
+      back.className = "lt42-flip-card-back p-6 flex flex-col w-full h-full bg-white md:drop-shadow-md md:rounded-lg";
+      innerFlipper.appendChild(back);
+
       const titleBar = document.createElement("div");
       titleBar.className = "flex flex-col gap-1 md:flex-row place-items-center justify-between mb-2";
       const title = document.createElement("div");
       title.className = "font-bold text-black uppercase text-sm";
       title.textContent = "Friends";
       titleBar.appendChild(title);
-      inner.appendChild(titleBar);
 
-      // Friends list container
+      const btnContainer = document.createElement("div");
+      btnContainer.className = "flex flex-row gap-2";
+      
+      const createIntraBtn = (text, view) => {
+        const btn = document.createElement("div");
+        btn.className = "text-center text-legacy-main bg-transparent border border-legacy-main py-1 px-2 cursor-pointer text-[10px] uppercase hover:bg-legacy-main/5 transition-colors";
+        btn.textContent = text;
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          showBackView(view);
+        };
+        return btn;
+      };
+
+      const btnLogtime = createIntraBtn("Top Logtime", "logtime");
+      const btnLevel = createIntraBtn("Top Level", "level");
+      const btnAdd = createIntraBtn("Add friend", "add");
+
+      btnContainer.appendChild(btnLogtime);
+      btnContainer.appendChild(btnLevel);
+      btnContainer.appendChild(btnAdd);
+      titleBar.appendChild(btnContainer);
+      front.appendChild(titleBar);
+
+      // Function to handle switching views on the back
+      function showBackView(viewType) {
+        // Clear back content
+        back.innerHTML = "";
+        
+        // Header for back
+        const backHeader = document.createElement("div");
+        backHeader.className = "flex flex-col gap-1 md:flex-row place-items-center justify-between mb-4";
+        const backTitle = document.createElement("div");
+        backTitle.className = "font-bold text-black uppercase text-sm";
+        backTitle.textContent = viewType === "add" ? "Add New Friend" : "Monthly Podium";
+        backHeader.appendChild(backTitle);
+        
+        // Add back button to return to front
+        const backBtn = document.createElement("div");
+        backBtn.className = "text-center text-gray-400 bg-transparent border border-gray-300 py-1 px-2 cursor-pointer text-[10px] uppercase hover:bg-gray-50";
+        backBtn.textContent = "Close";
+        backBtn.onclick = (e) => {
+          e.stopPropagation();
+          card.classList.remove("is-flipped");
+        };
+        backHeader.appendChild(backBtn);
+        back.appendChild(backHeader);
+
+        if (viewType === "add") {
+          renderAddFriendForm(back);
+        } else {
+          const content = document.createElement("div");
+          content.className = "lt42-podium-container";
+          back.appendChild(content);
+          
+          const allStats = [];
+          if (ownLogin) {
+            allStats.push({ login: ownLogin, totalMs: ownLogtimeMs, level: ownLevel, avatar: ownAvatar });
+          }
+          Object.keys(friendsStats).forEach(login => {
+            const fs = friendsStats[login];
+            allStats.push({ login: login, totalMs: fs.totalMs || 0, level: fs.level || 0, avatar: fs.avatar });
+          });
+
+          if (viewType === "logtime") {
+            const logtimeTop = [...allStats].sort((a, b) => b.totalMs - a.totalMs).slice(0, 3);
+            renderPodiumSection(content, "Top Logtime", logtimeTop, (val) => {
+              const h = Math.floor(val / 3600000);
+              const m = Math.floor((val % 3600000) / 60000);
+              return h + "h" + m.toString().padStart(2, "0");
+            }, "totalMs");
+          } else {
+            const levelTop = [...allStats].sort((a, b) => b.level - a.level).slice(0, 3);
+            renderPodiumSection(content, "Top Level", levelTop, (val) => "Lvl " + val.toFixed(2), "level");
+          }
+        }
+
+        if (!card.classList.contains("is-flipped")) {
+          card.classList.add("is-flipped");
+        }
+      }
+
+      function renderAddFriendForm(container) {
+        const form = document.createElement("div");
+        form.className = "flex flex-col gap-4 mt-8 items-center justify-center h-full pb-12";
+        
+        const input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = "Enter Intra login...";
+        input.className = "w-full max-w-[200px] border border-gray-300 p-2 rounded text-sm focus:outline-none focus:border-legacy-main";
+        
+        const addBtn = document.createElement("button");
+        addBtn.className = "bg-legacy-main text-white px-6 py-2 rounded text-sm font-bold uppercase hover:bg-opacity-90 transition-all";
+        addBtn.textContent = "Add Friend";
+        
+        const msg = document.createElement("div");
+        msg.className = "text-xs mt-2";
+        
+        addBtn.onclick = async () => {
+          const login = input.value.trim().toLowerCase();
+          if (!login) return;
+          
+          addBtn.disabled = true;
+          addBtn.textContent = "Processing...";
+          
+          chrome.storage.local.get({ friendsList: [] }, (data) => {
+            let list = data.friendsList;
+            if (list.includes(login)) {
+              msg.textContent = "Friend already in list!";
+              msg.style.color = "orange";
+              addBtn.disabled = false;
+              addBtn.textContent = "Add Friend";
+              return;
+            }
+            list.push(login);
+            
+            // Clear cache to force a fresh fetch from Intra API for everyone
+            const keysToClear = ['cachedFriends', 'monthlyLogtime', 'cachedStats', 'cachedLocations', 'friendAvatars'];
+            chrome.storage.local.remove(keysToClear, () => {
+              chrome.storage.local.set({ friendsList: list }, () => {
+                msg.textContent = "Cache cleared! Fetching fresh data...";
+                msg.style.color = "#00babc";
+                chrome.runtime.sendMessage({ action: "refresh" });
+                
+                setTimeout(() => {
+                  window.location.reload();
+                }, 3000); // Increased to 3s to give background script more time
+              });
+            });
+          });
+        };
+        
+        form.appendChild(input);
+        form.appendChild(addBtn);
+        form.appendChild(msg);
+        container.appendChild(form);
+      }
+
       const listContainer = document.createElement("div");
       listContainer.className = "h-full";
       listContainer.style.overflowY = "auto";
 
       const friendKeys = Object.keys(friendsStats);
       if (friendKeys.length === 0 && friendsList.length > 0) {
-        // Friends configured but no data yet
         const emptyMsg = document.createElement("div");
-        emptyMsg.style.cssText =
-          "display:flex;align-items:center;justify-content:center;height:100%;color:#888;font-size:13px;";
+        emptyMsg.style.cssText = "display:flex;align-items:center;justify-content:center;height:100%;color:#888;font-size:13px;";
         emptyMsg.textContent = "Loading friends data…";
         listContainer.appendChild(emptyMsg);
       } else {
-        // Sort: online first, then alphabetical
         friendKeys.sort(function (a, b) {
           const aOnline = friendsStats[a].active ? 1 : 0;
           const bOnline = friendsStats[b].active ? 1 : 0;
@@ -151,21 +292,13 @@
           const f = friendsStats[login];
           const row = document.createElement("a");
           row.href = "https://profile.intra.42.fr/users/" + login;
-          row.style.cssText =
-            "display:flex;align-items:center;gap:10px;padding:8px 10px;text-decoration:none;color:inherit;" +
-            "border-bottom:1px solid #f0f0f0;transition:background .15s;cursor:pointer;";
-          row.addEventListener("mouseenter", function () { row.style.background = "#f8f8f8"; });
-          row.addEventListener("mouseleave", function () { row.style.background = "transparent"; });
-
-          // Avatar
+          row.style.cssText = "display:flex;align-items:center;gap:10px;padding:8px 10px;text-decoration:none;color:inherit;border-bottom:1px solid #f0f0f0;transition:background .15s;cursor:pointer;";
+          
           const avatar = document.createElement("div");
-          avatar.style.cssText =
-            "width:34px;height:34px;border-radius:50%;overflow:hidden;flex-shrink:0;" +
-            "background:#e0e0e0;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#555;";
+          avatar.style.cssText = "width:34px;height:34px;border-radius:50%;overflow:hidden;flex-shrink:0;background:#e0e0e0;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#555;";
           if (f.avatar) {
             const img = document.createElement("img");
             img.src = f.avatar;
-            img.alt = login;
             img.style.cssText = "width:100%;height:100%;object-fit:cover;";
             avatar.appendChild(img);
           } else {
@@ -173,38 +306,27 @@
           }
           row.appendChild(avatar);
 
-          // Info block
           const info = document.createElement("div");
           info.style.cssText = "flex:1;min-width:0;";
-
           const nameRow = document.createElement("div");
           nameRow.style.cssText = "display:flex;align-items:center;gap:6px;";
-
           const nameSpan = document.createElement("span");
           nameSpan.style.cssText = "font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
           nameSpan.textContent = login;
           nameRow.appendChild(nameSpan);
 
-          // Online indicator
           const statusDot = document.createElement("span");
-          statusDot.style.cssText =
-            "width:8px;height:8px;border-radius:50%;flex-shrink:0;" +
-            (f.active ? "background:#22c55e;" : "background:#d1d5db;");
+          statusDot.style.cssText = "width:8px;height:8px;border-radius:50%;flex-shrink:0;" + (f.active ? "background:#22c55e;" : "background:#d1d5db;");
           nameRow.appendChild(statusDot);
-
           info.appendChild(nameRow);
 
-          // Logtime + location line
           const detailRow = document.createElement("div");
           detailRow.style.cssText = "font-size:11px;color:#888;margin-top:1px;display:flex;gap:8px;";
-
-          // Level
           const lvlSpan = document.createElement("span");
           lvlSpan.style.cssText = "color:#00babc;font-weight:700;";
           lvlSpan.textContent = "Lvl " + (f.level || 0).toFixed(2);
           detailRow.appendChild(lvlSpan);
 
-          // Compute logtime
           let totalMs = f.totalMs || 0;
           const fh = Math.floor(totalMs / 3600000);
           const fm = Math.floor((totalMs % 3600000) / 60000);
@@ -212,26 +334,81 @@
           ltSpan.textContent = "⏱ " + fh + "h" + fm.toString().padStart(2, "0");
           detailRow.appendChild(ltSpan);
 
-
           if (f.active) {
             const locSpan = document.createElement("span");
             locSpan.style.cssText = "color:#22c55e;";
             locSpan.textContent = "📍 " + f.active;
             detailRow.appendChild(locSpan);
           }
-
           info.appendChild(detailRow);
           row.appendChild(info);
           listContainer.appendChild(row);
         });
       }
+      front.appendChild(listContainer);
 
-      inner.appendChild(listContainer);
-      card.appendChild(inner);
-
-      // Insert after the achievements card
       achievementsCard.parentElement.insertBefore(card, achievementsCard.nextSibling);
     });
+  }
+
+  function renderPodiumSection(container, titleText, top3, formatFn, valueKey) {
+    const section = document.createElement("div");
+    section.className = "lt42-podium-section";
+    
+    // We don't need the inline title anymore as it's in the header
+    const row = document.createElement("div");
+    row.className = "lt42-podium-row";
+    
+    const order = [1, 0, 2]; // 2nd, 1st, 3rd
+    order.forEach((renderIdx) => {
+      const data = top3[renderIdx];
+      if (!data) {
+          const empty = document.createElement("div");
+          empty.className = "lt42-podium-step";
+          empty.style.visibility = "hidden";
+          row.appendChild(empty);
+          return;
+      }
+
+      const step = document.createElement("div");
+      step.className = `lt42-podium-step pos-${renderIdx + 1}`;
+      
+      const label = document.createElement("div");
+      label.className = "lt42-podium-label";
+      label.textContent = data.login;
+      step.appendChild(label);
+
+      const avatar = document.createElement("div");
+      avatar.className = "lt42-podium-avatar";
+      if (data.avatar) {
+        const img = document.createElement("img");
+        img.src = data.avatar;
+        avatar.appendChild(img);
+      } else {
+        avatar.textContent = data.login.substring(0, 2).toUpperCase();
+        avatar.style.display = "flex";
+        avatar.style.alignItems = "center";
+        avatar.style.justifyContent = "center";
+        avatar.style.fontSize = "16px";
+        avatar.style.fontWeight = "bold";
+      }
+      step.appendChild(avatar);
+
+      const box = document.createElement("div");
+      box.className = `lt42-podium-box podium-color-${renderIdx + 1}`;
+      box.textContent = renderIdx + 1;
+      
+      const value = document.createElement("div");
+      value.className = "lt42-podium-value";
+      value.textContent = formatFn(data[valueKey]);
+      step.appendChild(value); 
+      step.appendChild(box); 
+
+      row.appendChild(step);
+    });
+
+    section.appendChild(row);
+    container.appendChild(section);
   }
 
   // ─── 3. Inject Styles ──────────────────────────────────────────────────────
@@ -249,19 +426,157 @@
         from { opacity: 0; transform: translateY(-6px); }
         to   { opacity: 1; transform: translateY(0); }
       }
+
+      /* Flip Card Core */
+      .lt42-flip-card {
+        background-color: transparent;
+        perspective: 1000px;
+        cursor: pointer;
+        min-height: 384px; /* matching md:h-96 */
+      }
+      .lt42-flip-card-inner {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        text-align: center;
+        transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        transform-style: preserve-3d;
+      }
+      .lt42-flip-card.is-flipped .lt42-flip-card-inner {
+        transform: rotateY(180deg);
+      }
+      .lt42-flip-card-front, .lt42-flip-card-back {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        -webkit-backface-visibility: hidden;
+        backface-visibility: hidden;
+        border-radius: 0.5rem;
+      }
+      .lt42-flip-card-back {
+        transform: rotateY(180deg);
+        background: white;
+        display: flex;
+        flex-direction: column;
+        z-index: 1;
+      }
+      .lt42-flip-card-front {
+        z-index: 2;
+      }
+
+      /* Podiums */
+      .lt42-podium-container {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        height: 100%;
+        padding-bottom: 20px;
+      }
+      .lt42-podium-section {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        width: 100%;
+      }
+      .lt42-podium-row {
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        gap: 25px;
+        height: 180px; 
+        width: 100%;
+      }
+      .lt42-podium-step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 110px;
+        position: relative;
+      }
+      .lt42-podium-avatar {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        border: 3px solid white;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        overflow: hidden;
+        background: #f0f0f0;
+        margin-bottom: 8px;
+        z-index: 2;
+        position: relative;
+      }
+      .lt42-podium-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .lt42-podium-box {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 800;
+        border-radius: 6px 6px 0 0;
+        font-size: 18px;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      }
+      .podium-color-1 { 
+        height: 70px; 
+        background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
+        border: 1px solid #e5bl00;
+        z-index: 1;
+      }
+      .podium-color-2 { 
+        height: 50px; 
+        background: linear-gradient(135deg, #c0c0c0 0%, #8e8e8e 100%);
+        border: 1px solid #a0a0a0;
+      }
+      .podium-color-3 { 
+        height: 35px; 
+        background: linear-gradient(135deg, #cd7f32 0%, #8b4513 100%);
+        border: 1px solid #b87333;
+      }
+      
+      .lt42-podium-label {
+        position: absolute;
+        top: -45px;
+        font-size: 12px;
+        font-weight: 800;
+        white-space: nowrap;
+        color: #111;
+        background: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        z-index: 5;
+        border: 1px solid #eee;
+      }
+      .lt42-podium-value {
+        font-size: 14px;
+        font-weight: 900;
+        color: #111;
+        background: white;
+        padding: 4px 14px;
+        border-radius: 12px;
+        margin-bottom: -10px;
+        z-index: 3;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border: 2px solid #fff;
+        white-space: nowrap;
+      }
     `;
     document.head.appendChild(style);
   }
 
   // ─── 4. Boot ───────────────────────────────────────────────────────────────
   function boot() {
-    // Only run on profile pages
     const path = window.location.pathname;
     if (path !== "/" && !path.startsWith("/users/")) return;
 
     injectStyles();
 
-    // Wait for the React app to render the grid before injecting
     function tryInject(attempt) {
       const cards = document.querySelectorAll(".font-bold.text-black.uppercase.text-sm");
       if (cards.length >= 3 || attempt > 20) {
@@ -274,7 +589,6 @@
     tryInject(0);
   }
 
-  // The React profile app renders asynchronously — give it a moment
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { setTimeout(boot, 1500); });
   } else {

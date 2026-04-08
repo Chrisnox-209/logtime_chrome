@@ -356,12 +356,14 @@ async function refreshAllData() {
           // Sleep to respect 42 API rate limit
           await new Promise(r => setTimeout(r, 600));
 
-          // Check if we need to re-fetch the friend's profile (avatar)
+          // Check if we need to re-fetch the friend's profile (avatar/level)
+          // We fetch if: avatar is missing/old OR if level is missing/0
           const cachedAvatar = friendAvatars[friend];
           const avatarFresh = cachedAvatar && cachedAvatar.fetchedAt && (Date.now() - cachedAvatar.fetchedAt < 86400000); // 24h
+          const levelMissing = !oldFriendsStats[friend] || !oldFriendsStats[friend].level || oldFriendsStats[friend].level === 0;
 
           let friendProfilePromise = null;
-          if (!avatarFresh) {
+          if (!avatarFresh || levelMissing) {
             friendProfilePromise = fetch(`https://api.intra.42.fr/v2/users/${friend}`, {
               headers: { 'Authorization': `Bearer ${currentToken}` }
             }).catch(e => null);
