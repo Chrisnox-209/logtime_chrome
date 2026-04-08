@@ -43,6 +43,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleLogin().then(res => sendResponse(res));
     return true;
   }
+  if (request.action === "getOutstandingData") {
+    (async () => {
+      try {
+        const ids = await getOutstandingProjects(request.login);
+        sendResponse({ outstandingIds: ids || [] });
+      } catch (e) {
+        console.error("[LT42] Message handling error:", e);
+        sendResponse({ outstandingIds: [] });
+      }
+    })();
+    return true; // Keep channel open for async response
+  }
 });
 
 async function handleLogin() {
@@ -488,9 +500,62 @@ async function refreshAllData() {
 
 
     return true;
-
   } catch (err) {
     console.error("Erreur lors du refresh:", err);
     return false;
+  }
+}
+
+async function getOutstandingProjects(login) {
+  try {
+    const data = await chrome.storage.local.get(['outstandingCache']);
+    const cache = data.outstandingCache || {};
+    const entry = cache[login];
+
+    // 24h cache (86400000 ms)
+    if (entry && (Date.now() - entry.timestamp < 86400000)) {
+      return entry.ids;
+    }
+
+    const token = await getValidToken();
+    if (!token) {
+      console.warn("[LT42] No valid API token found. Please check your UID/Secret in options.");
+      return [];
+    }
+
+    console.log(`[LT42] Fetching Outstanding data for ${login}...`);
+    const res = await fetch(`https://api.intra.42.fr/v2/users/${login}/scale_teams/as_corrected?per_page=100`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!res.ok) {
+        console.error(`[LT42] API request failed for ${login}: ${res.status}`);
+        return [];
+    }
+
+    const evals = await res.json();
+    if (!Array.isArray(evals)) return [];
+
+    console.log(`[LT42] Processing ${evals.length} evaluations for ${login}...`);
+
+    // Flag ID 9 is "Outstanding project"
+    const outstandingIds = evals
+      .filter(e => e.flag && (e.flag.id === 9 || (e.flag.name && e.flag.name.toLowerCase().includes('outstanding'))))
+      .map(e => {
+        const teamUser = e.team.users.find(u => u.login === login);
+        return teamUser ? teamUser.projects_user_id.toString() : null;
+      })
+      .filter(id => id !== null);
+
+    const uniqueIds = [...new Set(outstandingIds)];
+    console.log(`[LT42] Found ${uniqueIds.length} outstanding IDs for ${login}:`, uniqueIds);
+
+    cache[login] = { ids: uniqueIds, timestamp: Date.now() };
+    await chrome.storage.local.set({ outstandingCache: cache });
+
+    return uniqueIds;
+  } catch (e) {
+    console.error("[LT42] Error in getOutstandingProjects:", e);
+    return [];
   }
 }

@@ -4,6 +4,8 @@
 (function () {
   "use strict";
 
+  let outstandingProjectIds = [];
+
   // ─── Utility ───────────────────────────────────────────────────────────────
   function minutesToHM(mins) {
     const h = Math.floor(mins / 60);
@@ -35,6 +37,64 @@
     const loginSpan = document.querySelector("span[data-login]");
     if (loginSpan) return loginSpan.getAttribute("data-login");
     return null;
+  }
+
+  function injectHeaderStats() {
+    chrome.storage.local.get(["monthlyLogtime", "cachedLocations", "activeSession", "username"], function (data) {
+      const ownLogin = data.username;
+      const currentProfileLogin = getProfileUserName();
+      if (!ownLogin || !currentProfileLogin || ownLogin !== currentProfileLogin) return;
+
+      const monthlyLogtime = data.monthlyLogtime || {};
+      const locations = data.cachedLocations || [];
+      const activeSession = data.activeSession;
+
+      const now = new Date();
+      const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const currentMonthLabel = MONTH_NAMES[now.getMonth()];
+      const monthMins = monthlyLogtime[currentMonthLabel] || 0;
+
+      // Today's logtime calculation
+      const todayStr = now.toDateString();
+      let todayMins = 0;
+      locations.forEach(loc => {
+          if (new Date(loc.begin_at).toDateString() === todayStr) {
+              const start = new Date(loc.begin_at);
+              const end = loc.end_at ? new Date(loc.end_at) : new Date();
+              todayMins += (end - start) / 60000;
+          }
+      });
+      // Add active session if started today
+      if (activeSession && new Date(activeSession.begin_at).toDateString() === todayStr) {
+          todayMins += (now - new Date(activeSession.begin_at)) / 60000;
+      }
+
+      // Find the status pill using its characteristic classes and position
+      const statusPill = document.querySelector(".absolute.px-2.py-1.rounded-full.top-2.right-4");
+      if (!statusPill || document.getElementById("lt42-header-stats")) return;
+
+      const container = document.createElement("div");
+      container.id = "lt42-header-stats";
+      // Lower z-index and adjust positioning to inherit stacking context safely
+      container.style.cssText = "position:absolute; right:1rem; top:55px; display:flex; flex-direction:column; align-items:flex-end; gap:6px; pointer-events:none; z-index:5;";
+
+      const createPill = (label, value) => {
+          const pill = document.createElement("div");
+          pill.className = "px-2 py-1 border rounded-full border-neutral-600 bg-ft-gray shadow-sm flex items-center gap-2";
+          pill.style.minWidth = "90px";
+          pill.style.justifyContent = "space-between";
+          pill.innerHTML = `
+            <span style="font-size: 8px; font-weight: 800; color: #888; text-transform: uppercase;">${label}</span>
+            <span style="font-size: 11px; font-weight: 900; color: #ccc;">${value}</span>
+          `;
+          return pill;
+      };
+
+      container.appendChild(createPill("Today", minutesToHM(todayMins)));
+      container.appendChild(createPill("Month", minutesToHM(monthMins)));
+      
+      statusPill.parentElement.appendChild(container);
+    });
   }
 
   function injectMonthlyTotals() {
@@ -411,7 +471,108 @@
     container.appendChild(section);
   }
 
-  // ─── 3. Inject Styles ──────────────────────────────────────────────────────
+  // ─── 3. Project Decorations (Bonus & Outstanding) ──────────────────────────
+  function decorateOutstandingProjects() {
+    const titleDivs = document.querySelectorAll(".font-bold.text-black.uppercase.text-sm");
+    let marksCard = null;
+    titleDivs.forEach(el => {
+      if (el.textContent.trim().toLowerCase() === "marks") {
+        marksCard = el.closest(".bg-white") || el.closest("[class*='bg-white']");
+      }
+    });
+
+    if (!marksCard) return;
+
+    // Find all rows in the Marks card
+    const rows = marksCard.querySelectorAll(".flex.flex-row.justify-between.hover\\:bg-gray-300.p-2");
+    rows.forEach(row => {
+      // Try to extract projects_user_id from the link
+      const link = row.querySelector("a[href*='/projects_users/']");
+      let projectsUserId = null;
+      if (link) {
+        // More robust extraction: get the last numeric segment of the path
+        const match = link.href.match(/\/projects_users\/(\d+)/);
+        if (match) projectsUserId = match[1];
+      }
+
+      const scoreDiv = row.querySelector(".text-xs.flex.flex-row.items-center");
+      if (!scoreDiv) return;
+
+      const scoreText = scoreDiv.textContent.trim();
+      const score = parseInt(scoreText, 10);
+
+      const isVerifiedOutstanding = projectsUserId && outstandingProjectIds.includes(projectsUserId);
+      const isBonus = score > 100 || row.textContent.toLowerCase().includes("outstanding");
+
+      if (isVerifiedOutstanding && isBonus && score > 100) {
+        // ULTRA THEME: Both Bonus > 100 and Outstanding (Red)
+        if (row.classList.contains("lt42-ultra-project")) return;
+        row.classList.remove("lt42-bonus-project", "lt42-outstanding-project");
+        row.classList.add("lt42-ultra-project");
+
+        const nameContainer = row.querySelector(".flex.flex-row.gap-1");
+        if (nameContainer) {
+          const oldBadge = nameContainer.querySelector(".lt42-bonus-badge, .lt42-outstanding-badge, .lt42-ultra-badge");
+          if (oldBadge) oldBadge.remove();
+
+          const badgeContainer = document.createElement("div");
+          badgeContainer.className = "flex items-center gap-1 lt42-ultra-badge";
+          
+          badgeContainer.innerHTML = `
+            <div class="lt42-outstanding-badge small">
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              <span>Outstanding</span>
+            </div>
+            <div class="lt42-bonus-badge small">
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+              <span>Bonus</span>
+            </div>
+          `;
+          nameContainer.appendChild(badgeContainer);
+        }
+      } else if (isVerifiedOutstanding) {
+        // GOLD THEME (Star)
+        if (row.classList.contains("lt42-outstanding-project")) return;
+        row.classList.remove("lt42-bonus-project", "lt42-ultra-project");
+        row.classList.add("lt42-outstanding-project");
+
+        const nameContainer = row.querySelector(".flex.flex-row.gap-1");
+        if (nameContainer) {
+          const oldBadge = nameContainer.querySelector(".lt42-bonus-badge, .lt42-outstanding-badge, .lt42-ultra-badge");
+          if (oldBadge) oldBadge.remove();
+
+          const badge = document.createElement("div");
+          badge.className = "lt42-outstanding-badge small";
+          badge.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+            <span>Outstanding</span>
+          `;
+          nameContainer.appendChild(badge);
+        }
+      } else if (isBonus) {
+        // BLUE THEME (Medal)
+        if (row.classList.contains("lt42-bonus-project") || row.classList.contains("lt42-outstanding-project") || row.classList.contains("lt42-ultra-project")) return;
+        
+        row.classList.add("lt42-bonus-project");
+
+        const nameContainer = row.querySelector(".flex.flex-row.gap-1");
+        if (nameContainer) {
+          const oldBadge = nameContainer.querySelector(".lt42-bonus-badge, .lt42-outstanding-badge, .lt42-ultra-badge");
+          if (oldBadge) oldBadge.remove();
+
+          const badge = document.createElement("div");
+          badge.className = "lt42-bonus-badge small";
+          badge.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+            <span>Bonus</span>
+          `;
+          nameContainer.appendChild(badge);
+        }
+      }
+    });
+  }
+
+  // ─── 4. Inject Styles ──────────────────────────────────────────────────────
   function injectStyles() {
     const style = document.createElement("style");
     style.id = "logtime42-profile-styles";
@@ -566,6 +727,109 @@
         border: 2px solid #fff;
         white-space: nowrap;
       }
+
+      /* Bonus Projects */
+      .lt42-bonus-project {
+        position: relative;
+        border-left: 4px solid #00babc !important;
+        background: rgba(0, 186, 188, 0.03) !important;
+        transition: all 0.3s ease;
+        animation: lt42-blueGlowPulse 4s infinite ease-in-out;
+      }
+      .lt42-bonus-project:hover {
+        background: rgba(0, 186, 188, 0.08) !important;
+        transform: translateX(4px);
+      }
+      .lt42-bonus-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: #00babc;
+        color: white;
+        font-size: 9px;
+        font-weight: 800;
+        padding: 1px 6px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        margin-left: 6px;
+        box-shadow: 0 2px 4px rgba(0, 186, 188, 0.2);
+        vertical-align: middle;
+      }
+      .lt42-bonus-badge.small {
+        font-size: 7px;
+        padding: 1px 4px;
+        gap: 2px;
+      }
+      .lt42-bonus-badge svg {
+        stroke: white;
+        flex-shrink: 0;
+      }
+      @keyframes lt42-blueGlowPulse {
+        0% { box-shadow: inset 4px 0 0 rgba(0, 186, 188, 0.1); }
+        50% { box-shadow: inset 20px 0 30px rgba(0, 186, 188, 0.08); }
+        100% { box-shadow: inset 4px 0 0 rgba(0, 186, 188, 0.1); }
+      }
+
+      /* Outstanding Projects (Gold) */
+      .lt42-outstanding-project {
+        position: relative;
+        border-left: 4px solid #ffd700 !important;
+        background: rgba(255, 215, 0, 0.04) !important;
+        transition: all 0.3s ease;
+        animation: lt42-goldGlowPulse 4s infinite ease-in-out;
+      }
+      .lt42-outstanding-project:hover {
+        background: rgba(255, 215, 0, 0.09) !important;
+        transform: translateX(4px);
+      }
+      .lt42-outstanding-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: #ffd700;
+        color: black;
+        font-size: 9px;
+        font-weight: 900;
+        padding: 1px 6px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        margin-left: 6px;
+        box-shadow: 0 0 10px rgba(255, 215, 0, 0.4);
+        vertical-align: middle;
+      }
+      .lt42-outstanding-badge.small {
+        font-size: 7px;
+        padding: 1px 4px;
+        gap: 2px;
+      }
+      .lt42-outstanding-badge svg {
+        fill: black;
+        stroke: black;
+        flex-shrink: 0;
+      }
+      @keyframes lt42-goldGlowPulse {
+        0% { box-shadow: inset 4px 0 0 rgba(255, 215, 0, 0.1); }
+        50% { box-shadow: inset 20px 0 30px rgba(255, 215, 0, 0.12); }
+        100% { box-shadow: inset 4px 0 0 rgba(255, 215, 0, 0.1); }
+      }
+
+      /* Ultra Projects (Red - Both) */
+      .lt42-ultra-project {
+        position: relative;
+        border-left: 4px solid #ff4757 !important;
+        background: rgba(255, 71, 87, 0.05) !important;
+        transition: all 0.3s ease;
+        animation: lt42-redGlowPulse 4s infinite ease-in-out;
+      }
+      .lt42-ultra-project:hover {
+        background: rgba(255, 71, 87, 0.1) !important;
+        transform: translateX(4px);
+      }
+      @keyframes lt42-redGlowPulse {
+        0% { box-shadow: inset 4px 0 0 rgba(255, 71, 87, 0.1); }
+        50% { box-shadow: inset 20px 0 30px rgba(255, 71, 87, 0.1); }
+        100% { box-shadow: inset 4px 0 0 rgba(255, 71, 87, 0.1); }
+      }
     `;
     document.head.appendChild(style);
   }
@@ -577,11 +841,27 @@
 
     injectStyles();
 
+    // Fetch Outstanding data for current profile
+    const currentProfileLogin = getProfileUserName();
+    console.log("[LT42] Current Profile Login:", currentProfileLogin);
+    if (currentProfileLogin) {
+      chrome.runtime.sendMessage({ action: "getOutstandingData", login: currentProfileLogin }, (response) => {
+        console.log("[LT42] Received Outstanding IDs:", response ? response.outstandingIds : "null");
+        if (response && response.outstandingIds) {
+          outstandingProjectIds = response.outstandingIds;
+          // Re-run decoration if cards already exist
+          decorateOutstandingProjects();
+        }
+      });
+    }
+
     function tryInject(attempt) {
       const cards = document.querySelectorAll(".font-bold.text-black.uppercase.text-sm");
       if (cards.length >= 3 || attempt > 20) {
+        injectHeaderStats();
         injectMonthlyTotals();
         injectFriendsCard();
+        decorateOutstandingProjects();
       } else {
         setTimeout(function () { tryInject(attempt + 1); }, 500);
       }
