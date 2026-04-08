@@ -1,83 +1,82 @@
-# 🚀 Logtime 42 - Chrome Extension
+# <img src="icon128.png" width="48" height="48" style="vertical-align: middle; margin-right: 10px;"> Logtime 42 - Extension Chrome Enrichie (Fork)
 
-Une extension Chrome moderne, rapide et complète pour les étudiants de l'école 42. Suivez votre **Logtime**, gérez vos **objectifs**, surveillez le statut de vos **amis** et visualisez l'occupation des clusters en un clin d'œil.
-
-![Logo](icon128.png)
+Une extension Chrome moderne, rapide et ultra-complète pour les étudiants de l'école 42. Ce fork améliore l'expérience originale en ajoutant des fonctionnalités premium directement sur votre profil Intra.
 
 ---
 
 ## 📋 Sommaire
-1. [Installation](#️-installation-mode-développeur)
+1. [Installation](#-installation-mode-développeur)
 2. [Configuration API](#-configuration-de-lapi-intra-42)
-3. [Fonctionnalités](#-fonctionnalités)
-    * [Logtime & Objectifs](#️-suivi-du-logtime--objectifs)
-    * [Planning](#-planning-personnalisé)
-    * [Amis & Notifications](#-gestion-des-amis--notifications)
-    * [Visualisation & Outils](#-visualisation--outils)
-4. [Confidentialité](#-confidentialité)
+3. [Nouvelles Fonctionnalités Premium](#-nouvelles-fonctionnalités-premium)
+4. [Fonctionnalités Classiques](#-fonctionnalités-classiques)
+5. [Confidentialité](#-confidentialité)
 
 ---
 
 ## 🛠️ Installation (Mode Développeur)
 
-Cette extension n'est pas encore sur le Chrome Web Store. Suivez ces étapes pour l'installer manuellement :
-
-1.  **Cloner le dépôt** :
-    ```bash
-    git clone https://github.com/elarue/logtime42.git
-    ```
+1.  **Télécharger le dépôt** : Téléchargez le code en tant qu'archive ZIP et extrayez-le.
 2.  **Accéder aux extensions** : Ouvrez Chrome et allez sur `chrome://extensions/`.
 3.  **Activer le mode développeur** : Basculez l'interrupteur en haut à droite.
-4.  **Charger l'extension** : Cliquez sur **"Charger l'extension non empaquetée"** (Load unpacked) et sélectionnez le dossier `logtime_chrome-main`.
-5.  **Épingler l'extension** : N'oubliez pas d'épingler "Logtime 42" à votre barre d'outils pour un accès rapide.
+4.  **Charger l'extension** : Cliquez sur **"Charger l'extension non empaquetée"** et sélectionnez le dossier de l'extension.
+5.  **Épingler l'extension** : Épinglez "Logtime 42" pour un accès rapide.
 
 ---
 
 ## 🔑 Configuration de l'API Intra 42
 
-Pour fonctionner, l'extension nécessite une application OAuth sur l'Intra de 42 :
+Pour les fonctionnalités avancées (Amis, Outstanding), vous devez configurer vos accès :
 
-1.  Rendez-vous sur [https://profile.intra.42.fr/oauth/applications/new](https://profile.intra.42.fr/oauth/applications/new).
-2.  Remplissez les champs comme suit :
-    *   **Name** : `logtime42`
-    *   **Description** : `Extension pour le suivi du logtime et des amis.`
-    *   **Redirect URI** : `https://localhost`
-3.  Cliquez sur **Submit**.
-4.  Copiez votre **UID** (Client ID) et votre **Secret**.
-5.  Ouvrez les **Options** de l'extension (clic-droit sur l'icône -> Options) et renseignez :
-    *   Votre **Login 42**.
-    *   L'**UID** et le **Secret** générés.
-6.  Cliquez sur **Sauvegarder** pour valider la connexion.
+1.  Créez une application sur [l'Intra](https://profile.intra.42.fr/oauth/applications/new).
+2.  **Redirect URI** : `https://localhost`
+3.  Copiez votre **UID** et votre **Secret**.
+4.  Ouvrez les **Options** de l'extension et renseignez votre **Login**, **UID** et **Secret**.
 
 ---
 
-## ✨ Fonctionnalités
+## ✨ Nouvelles Fonctionnalités Premium
 
-### ⏱️ Suivi du Logtime & Objectifs
-*   **Dashbord en temps réel** : Visualisez votre logtime du jour et du mois.
-*   **Cible Quotidienne** : Calcul précis des heures restantes par jour en fonction de votre planning.
-*   **Gift Days** : Déduisez des jours d'objectif (vacances, événements) pour ajuster votre barre de progression.
-*   **Freeze Days** : Ajoutez des jours de bonus à votre calcul de Blackhole pour plus de précision.
+### 📊 Dashboard Profil en Temps Réel
+Visualisez instantanément votre logtime du jour et du mois directement en haut de votre profil. Les pastilles s'intègrent parfaitement au design de l'Intra et s'adaptent à vos horaires.
 
-### 📅 Planning Personnalisé
-*   Configurez votre **Weekly Schedule** (jours travaillés) pour que l'extension adapte automatiquement votre objectif quotidien. Plus besoin de calculer de tête !
+![Header Stats](medias/card_profile_logtime.png)
 
-### 👥 Gestion des Amis & Notifications
-*   **Friends List** : Suivez le statut (en ligne/hors-ligne) et la position exacte (ex: `z3r12p4`) de vos amis.
-*   **Notifications 🔔** : Activez la cloche pour être prévenu instantanément dès qu'un ami se connecte.
-*   **Logtime des Amis** : Gardez un œil sur la progression mensuelle de vos camarades.
+### 👥 Système d'Amis & Podiums
+Une toute nouvelle carte interactive remplace vos "Achievements" pour afficher vos amis :
+- **Podiums Interactifs** : Visualisez qui est le "roi" du Logtime ou du Level ce mois-ci.
+- **Ajout Rapide** : Ajoutez des amis via une interface simple.
+- **Statut Live** : Voyez en un coup d'œil qui est en ligne et sur quel poste.
 
-### 📊 Visualisation & Outils
-*   **Calendar Heatmap** : Une vue thermique pour visualiser votre productivité sur le mois.
-*   **Matrix View** : Vérifiez l'occupation des postes dans les clusters sans quitter l'onglet actuel.
-*   **Project Tracker** : Affiche votre projet en cours et le temps écoulé depuis le début de la session.
-*   **Thème Coalition** : L'interface s'adapte automatiquement aux couleurs de votre coalition (Water, Fire, Earth, Air.).
+| Podium Logtime | Podium Level | Ajout Amis |
+| :---: | :---: | :---: |
+| ![Podium Logtime](medias/card_podium_logtime.png) | ![Podium Level](medias/card_podium_level.png) | ![Add Friend](medias/card_add_Friends.png) |
+
+### 🏅 Décoration Intelligente des Projets (MARKS)
+L'extension analyse vos projets et ceux de vos amis pour appliquer des décorations premium :
+- **Or ⭐ (Outstanding)** : Détecté automatiquement via l'API pour célébrer l'excellence.
+- **Bleu 🏅 (Bonus)** : Appliqué à tous les projets avec un score supérieur à 100.
+- **Rouge 🔥 (Ultra)** : Une décoration spéciale pour les projets cumulant à la fois un Bonus > 100 et une distinction Outstanding.
+
+![Project Decorations](medias/card_bonus_outsstanding.png)
+
+### 🖥️ Monitoring Matrix & Live Logtime
+Le menu Matrix a été amélioré pour offrir une navigation plus fluide et des informations en temps réel sur l'occupation des clusters et votre session en cours.
+
+![Menu Matrix](medias/menu_matrix.png)
+
+---
+
+## ⚙️ Fonctionnalités Classiques
+*   **Planning Personnalisé** : Adaptez vos objectifs quotidiens à votre emploi du temps.
+*   **Notifications de Connexion** : Soyez prévenu dès qu'un ami se connecte en cluster.
+*   **Calendar Heatmap** : Visualisez votre activité sur l'année.
+*   **Matrix View** : Vérifiez l'occupation des clusters en un clic.
 
 ---
 
 ## 🛡️ Confidentialité
-Toutes vos données (clés API, login, amis) sont stockées **localement** dans votre navigateur via `chrome.storage.local`. Aucune donnée n'est envoyée à un serveur tiers, à l'exception des requêtes directes à l'API officielle de 42.
+Toutes vos données (clés API, login, amis) sont stockées **localement** dans votre navigateur via `chrome.storage.local`. Aucune donnée n'est envoyée à un serveur tiers.
 
 ---
 
-*Développé par [elarue] pour la communauté 42.*
+*Amélioré avec passion pour la communauté 42.*
