@@ -8,6 +8,8 @@ const THRESHOLDS = {
     RED: 0       // 0 -> 1h41
 };
 
+let isMatrixEnabled = true;
+
 // Toujours afficher le temps réel
 function minutesToHoursMinutes(mins) {
     const h = Math.floor(mins / 60);
@@ -26,6 +28,7 @@ function getColorThemeForMinutes(mins, isClaimed) {
 }
 
 function generateCSS(clusterTimes, activeSession) {
+    if (!isMatrixEnabled) return '';
     let cssString = '';
 
     const activeHost = activeSession ? activeSession.host : null;
@@ -45,7 +48,8 @@ function generateCSS(clusterTimes, activeSession) {
         const theme = getColorThemeForMinutes(totalMins, isClaimed);
         if (!theme) continue;
 
-        const text = isClaimed ? theme.text : minutesToHoursMinutes(totalMins);
+        const timeStr = minutesToHoursMinutes(totalMins);
+        const text = isClaimed ? `CLAIMED\\00000a${timeStr}` : timeStr;
 
         cssString += `
             #host-${host} {
@@ -56,10 +60,10 @@ function generateCSS(clusterTimes, activeSession) {
             #${host} p { color: #ffffff !important; font-weight: 800 !important; }
             #${host} svg { color: #ffffff !important; }
             #host-${host}::after {
-                content: "${text}"; position: absolute; top: 43px; left: 50%; transform: translateX(-50%); 
-                background-color: #111827; color: #ffffff; font-size: 11px; font-weight: 900;
-                padding: 3px 8px; border-radius: 4px; white-space: nowrap; z-index: 100 !important;
-                border: 1px solid ${theme.bgColor}; pointer-events: none;
+                content: "${text}"; position: absolute; top: 40px; left: 50%; transform: translateX(-50%); 
+                background-color: #111827; color: #ffffff; font-size: 10px; font-weight: 900;
+                padding: 4px 8px; border-radius: 4px; white-space: pre-wrap !important; z-index: 100 !important;
+                border: 1px solid ${theme.bgColor}; pointer-events: none; text-align: center; line-height: 1.2;
             }
         `;
     }
@@ -105,6 +109,103 @@ async function fetchMyClaims() {
 
 function render() {
     injectOrUpdateCSS(currentClusterTimes, currentActiveSession);
+    updateStatsMenu();
+}
+
+function updateStatsMenu() {
+    let menu = document.getElementById('logtime42-stats-menu');
+    if (!menu) {
+        menu = document.createElement('div');
+        menu.id = 'logtime42-stats-menu';
+        menu.style.cssText = `
+            position: fixed; top: 80px; left: 20px; z-index: 10000;
+            background: rgba(17, 24, 39, 0.85); backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;
+            padding: 16px; color: white; font-family: sans-serif;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            min-width: 220px; transition: all 0.3s ease;
+        `;
+        document.body.appendChild(menu);
+    }
+
+    // Calculer les stats
+    let totalMins = 0;
+    const hostsList = [];
+
+    const activeHost = currentActiveSession ? currentActiveSession.host : null;
+    const activeStart = currentActiveSession ? new Date(currentActiveSession.begin_at) : null;
+
+    for (const [host, baseMins] of Object.entries(currentClusterTimes)) {
+        let hostMins = baseMins;
+        if (host === activeHost && activeStart) {
+            hostMins += Math.floor((new Date() - activeStart) / 60000);
+        }
+        totalMins += hostMins;
+        hostsList.push({ host, mins: hostMins });
+    }
+
+    hostsList.sort((a, b) => b.mins - a.mins);
+    const top5 = hostsList.slice(0, 5);
+
+    const isClaimedPage = window.location.pathname === '/claimed';
+    const navLabel = isClaimedPage ? 'Voir Matrix' : 'Mes Claims';
+
+    menu.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin: 0; font-size: 14px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em;">Logtime Global</h3>
+            <label class="logtime-switch">
+                <input type="checkbox" id="matrix-toggle" ${isMatrixEnabled ? 'checked' : ''}>
+                <span class="logtime-slider"></span>
+            </label>
+        </div>
+        <div style="font-size: 24px; font-weight: 800; margin-bottom: 16px; color: #22c55e;">
+            ${minutesToHoursMinutes(totalMins)}
+        </div>
+        <button id="matrix-nav-btn" style="
+            width: 100%; padding: 8px; margin-bottom: 16px; border-radius: 6px; 
+            border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa; font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: all 0.2s ease;
+        ">
+            ${navLabel}
+        </button>
+        <div style="margin-top: 12px;">
+            <h4 style="margin: 0 0 8px 0; font-size: 12px; color: #9ca3af;">TOP 5 PLACES</h4>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+                ${top5.map((h, i) => `
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span style="color: #d1d5db;">${i+1}. ${h.host}</span>
+                        <span style="font-weight: 700; color: #ffffff;">${minutesToHoursMinutes(h.mins)}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        <style>
+            #matrix-nav-btn:hover { background: rgba(59, 130, 246, 0.3) !important; border-color: #60a5fa !important; }
+            .logtime-switch { position: relative; display: inline-block; width: 34px; height: 20px; }
+            .logtime-switch input { opacity: 0; width: 0; height: 0; }
+            .logtime-slider { 
+                position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; 
+                background-color: #374151; transition: .4s; border-radius: 20px;
+            }
+            .logtime-slider:before { 
+                position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; 
+                background-color: white; transition: .4s; border-radius: 50%;
+            }
+            input:checked + .logtime-slider { background-color: #22c55e; }
+            input:checked + .logtime-slider:before { transform: translateX(14px); }
+        </style>
+    `;
+
+    document.getElementById('matrix-toggle').addEventListener('change', (e) => {
+        isMatrixEnabled = e.target.checked;
+        chrome.storage.local.set({ isMatrixEnabled: isMatrixEnabled });
+        render();
+    });
+
+    document.getElementById('matrix-nav-btn').addEventListener('click', () => {
+        window.location.href = isClaimedPage ? '/' : '/claimed';
+    });
 }
 
 // Debounce pour éviter de re-render trop souvent lors des mutations DOM
@@ -141,9 +242,10 @@ function waitForMatrixAndRender() {
 }
 
 // Chargement initial depuis le Storage
-chrome.storage.local.get(['clusterTimes', 'activeSession'], (data) => {
+chrome.storage.local.get(['clusterTimes', 'activeSession', 'isMatrixEnabled'], (data) => {
     currentClusterTimes = data.clusterTimes || {};
     currentActiveSession = data.activeSession || null;
+    isMatrixEnabled = data.isMatrixEnabled !== undefined ? data.isMatrixEnabled : true;
     fetchMyClaims();
     waitForMatrixAndRender();
 });
