@@ -56,9 +56,29 @@ export function renderFriends(friendsStats) {
     } else {
       av.textContent = login.substring(0, 2).toUpperCase();
     }
+    
+    // Add Coalition Color Border
+    if (f.coalitionColor) {
+      av.style.border = `2px solid ${f.coalitionColor}`;
+      // Fix box-sizing dynamically so it doesn't break alignment
+      av.style.boxSizing = "border-box";
+      av.style.boxShadow = `0 0 6px ${f.coalitionColor}40`; // slight glow
+    }
 
     // Info
-    clone.querySelector(".friend-name").textContent = login;
+    const nameEl = clone.querySelector(".friend-name");
+    nameEl.textContent = login;
+    
+    // Add Coalition Logo next to name
+    if (f.coalitionLogo) {
+      const logoImg = document.createElement("img");
+      logoImg.src = f.coalitionLogo;
+      logoImg.style.height = "14px";
+      logoImg.style.marginLeft = "6px";
+      logoImg.style.verticalAlign = "middle";
+      nameEl.appendChild(logoImg);
+    }
+    
     clone.querySelector(".friend-logtime").textContent = `${fh}h ${fm}m`;
 
     // Status
