@@ -37,19 +37,25 @@ Pour les fonctionnalités avancées (Amis, Outstanding), vous devez configurer v
 ## ✨ Nouvelles Fonctionnalités Premium
 
 ### 📊 Dashboard Profil en Temps Réel
-Visualisez instantanément votre logtime du jour et du mois directement en haut de votre profil. Les pastilles s'intègrent parfaitement au design de l'Intra et s'adaptent à vos horaires.
+Visualisez instantanément votre logtime du jour et du mois directement en haut de votre profil. Les pastilles s'intègrent parfaitement au design de l'Intra et s'adaptent à vos horaires. Vous remarquerez également l'apparition d'une **magnifique étoile dorée** 🌟 au-dessus de votre avatar si votre Coalition domine actuellement le campus !
 
 ![Header Stats](medias/card_profile_logtime.png)
 
-### 👥 Système d'Amis & Podiums
-Une toute nouvelle carte interactive remplace vos "Achievements" pour afficher vos amis :
-- **Podiums Interactifs** : Visualisez qui est le "roi" du Logtime ou du Level ce mois-ci.
-- **Ajout Rapide** : Ajoutez des amis via une interface simple.
-- **Statut Live** : Voyez en un coup d'œil qui est en ligne et sur quel poste.
+#### 📈 Records Personnels de Connexion
+Suivez et pulvérisez vos limites ! L'extension épluche automatiquement votre historique pour extraire et figer vos meilleures performances absolues (Meilleure Journée, Meilleure Semaine et Meilleur Mois) afin de vous motiver au quotidien.
 
-| Podium Logtime | Podium Level | Ajout Amis |
-| :---: | :---: | :---: |
-| ![Podium Logtime](medias/card_podium_logtime.png) | ![Podium Level](medias/card_podium_level.png) | ![Add Friend](medias/card_add_Friends.png) |
+<img src="medias/Records_Time.png" width="450">
+
+### 👥 Système d'Amis (Coalitions, Wallets & Podiums)
+Une toute nouvelle carte interactive pour afficher vos amis avec un design ultra premium :
+- **Identité Coalition** : Le logo et la couleur de la coalition de chaque ami s'affichent nativement sur son avatar.
+- **Étoile de Leader** : Une magnifique étoile dorée apparaît au-dessus des profils et avatars appartenant à la coalition vainqueur (en tête du campus) !
+- **Podiums Interactifs** : Visualisez vos amis s'affronter dans le **Top Logtime**, le **Top Level**, et le **Top Wallet (₳)**.
+- **Statut Live** : Voyez en un coup d'œil qui est en ligne, sur quel poste, et comparez vos Wallets.
+
+| Liste d'Amis | Podium Logtime | Podium Level | Podium ₳ | Ajout Amis |
+| :---: | :---: | :---: | :---: | :---: |
+| ![Friends](medias/card_friends.png) | ![Podium Logtime](medias/card_podium_logtime.png) | ![Podium Level](medias/card_podium_level.png) | ![Podium Wallet](medias/top_altherian.png) | ![Add Friend](medias/card_add_Friends.png) |
 
 ### 🏅 Décoration Intelligente des Projets (MARKS)
 L'extension analyse vos projets et ceux de vos amis pour appliquer des décorations premium :
@@ -59,10 +65,17 @@ L'extension analyse vos projets et ceux de vos amis pour appliquer des décorati
 
 ![Project Decorations](medias/card_bonus_outsstanding.png)
 
-### 🖥️ Monitoring Matrix & Live Logtime
-Le menu Matrix a été amélioré pour offrir une navigation plus fluide et des informations en temps réel sur l'occupation des clusters et votre session en cours.
+### 🖥️ Raccourci Matrix & Monitoring
+- **Icône Header** : Un accès direct à Matrix est intégré directement dans la barre de navigation du header de l'Intra (pour le campus concerné).
+- **Live Logtime** : Des informations en temps réel sur l'occupation des clusters et votre session en cours.
 
+![Matrix Icon](medias/icon_matrix.png)
 ![Menu Matrix](medias/menu_matrix.png)
+
+### 🛡️ Protection Anti-TIG (Shop Intra)
+Ne vous faites plus piéger au cluster ! L'extension masque et bloque automatiquement l'achat du fameux "Travail d'Intérêt Général" (TIG) dans la boutique de l'Intra 42. Si par malheur vous oubliez de verrouiller votre session en partant en pause, personne ne pourra vous l'acheter dans votre dos pour vous faire une mauvaise blague !
+
+![Protection Anti-TIG](medias/protection_TIG.png)
 
 ---
 
