@@ -121,6 +121,9 @@ function addFriend() {
     renderFriends();
     input.value = '';
     saveOptions();
+    
+    // Auto-scrape the new friend's profile to get badges/level/etc.
+    chrome.runtime.sendMessage({ action: "autoScrapeProfile", login: login });
   }
 }
 
@@ -137,12 +140,19 @@ async function loginToIntra() {
     if (response && response.status === 'success') {
       btn.textContent = '✅ CONNECTÉ';
       btn.classList.add('connected');
+      
+      // Unlock friends immediately
+      chrome.storage.local.get(['username', 'clientId', 'clientSecret', 'accessToken'], (items) => {
+        checkFriendsLock(items);
+      });
+
       setTimeout(() => {
         btn.textContent = originalText;
         btn.classList.remove('connected');
       }, 3000);
     } else {
-      alert(t('errorOAuth') + ': ' + (response && response.error ? response.error : 'Unknown'));
+      const errMsg = response ? (response.error || 'Erreur inconnue') : 'Le service n\'a pas répondu. Veuillez recharger l\'extension.';
+      alert(t('errorOAuth') + ': ' + errMsg);
     }
   });
 }
@@ -152,6 +162,7 @@ function saveOptions() {
     giftDays: parseInt(document.getElementById('giftDays').value) || 0,
     freezeDays: parseInt(document.getElementById('freezeDays').value) || 0,
     enableCoalitionTheme: document.getElementById('enableCoalitionTheme').checked,
+    enableAntiTig: document.getElementById('enableAntiTig').checked,
     enableFriendNotifs: document.getElementById('enableFriendNotifs').checked,
     username: document.getElementById('usernameInput').value.trim(),
     clientId: document.getElementById('clientId').value.trim(),
@@ -193,6 +204,7 @@ function restoreOptions() {
     giftDays: 0,
     freezeDays: 0,
     enableCoalitionTheme: true,
+    enableAntiTig: false,
     enableFriendNotifs: false,
     friendsList: [],
     notifFriends: [],
@@ -210,6 +222,7 @@ function restoreOptions() {
     document.getElementById('giftDays').value = items.giftDays;
     document.getElementById('freezeDays').value = items.freezeDays;
     document.getElementById('enableCoalitionTheme').checked = items.enableCoalitionTheme;
+    document.getElementById('enableAntiTig').checked = items.enableAntiTig;
     document.getElementById('enableFriendNotifs').checked = items.enableFriendNotifs;
 
     // Enable/Disable connect button
@@ -223,5 +236,28 @@ function restoreOptions() {
     daysKeys.forEach((_, index) => {
       document.getElementById(`day-${index}`).checked = items.days[`day-${index}`];
     });
+
+    checkFriendsLock(items);
   });
+}
+
+function checkFriendsLock(data) {
+  const friendsSection = document.getElementById('friendsSection');
+  const notifSection = document.getElementById('notifSection');
+  const lockMessage = document.getElementById('friendsLockMessage');
+  
+  const isClipped = (data.username && data.clientId && data.clientSecret && data.accessToken);
+  
+  if (isClipped) {
+    if (friendsSection) friendsSection.style.display = 'block';
+    if (notifSection) notifSection.style.display = 'block';
+    if (lockMessage) lockMessage.style.display = 'none';
+  } else {
+    if (friendsSection) friendsSection.style.display = 'none';
+    if (notifSection) notifSection.style.display = 'none';
+    if (lockMessage) {
+      lockMessage.style.display = 'block';
+      lockMessage.textContent = t('optionsFriendsLocked') || "Veuillez d'abord configurer et connecter l'API pour gérer vos amis.";
+    }
+  }
 }

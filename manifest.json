@@ -16,7 +16,8 @@
     "https://as2pik.fr/*",
     "https://profile.intra.42.fr/*",
     "https://profile-v3.intra.42.fr/*",
-    "https://translate.intra.42.fr/*"
+    "https://translate.intra.42.fr/*",
+    "https://shop.intra.42.fr/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -48,6 +49,11 @@
     {
       "matches": ["*://profile.intra.42.fr/*", "*://profile-v3.intra.42.fr/*"],
       "js": ["profile-content-script.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://shop.intra.42.fr/*"],
+      "js": ["shop-content-script.js"],
       "run_at": "document_idle"
     }
   ]

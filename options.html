@@ -44,6 +44,12 @@
           <span data-i18n="optionsCoalitionTheme">Activer le fond dynamique de ta Coalition</span>
         </label>
       </div>
+      <div class="input-group">
+        <label class="day-checkbox">
+          <input type="checkbox" id="enableAntiTig">
+          <span data-i18n="optionsAntiTig">🛡️ Mode ANTI-TIG (Protection Boutique)</span>
+        </label>
+      </div>
     </div>
 
     <div class="section">
@@ -54,7 +60,11 @@
       </div>
     </div>
 
-    <div class="section">
+    <div id="friendsLockMessage" style="display: none; color: #ff9f43; background: rgba(255, 159, 67, 0.1); border: 1px solid #ff9f43; text-align: center; font-weight: bold; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+      <!-- Dynamic lock message -->
+    </div>
+
+    <div class="section" id="friendsSection">
       <h2 data-i18n="optionsFriends">👥 Gestion des Amis</h2>
       <div class="input-group row">
         <input type="text" id="newFriend" placeholder="ex: norminet">
@@ -65,7 +75,7 @@
       </ul>
     </div>
 
-    <div class="section">
+    <div class="section" id="notifSection">
       <h2 data-i18n="optionsNotifications">🔔 Notifications</h2>
       <div class="input-group">
         <label class="day-checkbox">

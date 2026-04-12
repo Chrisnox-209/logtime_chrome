@@ -163,5 +163,11 @@
   },
   "optionsClientSecret": {
     "message": "Client Secret"
+  },
+  "optionsFriendsLocked": {
+    "message": "Veuillez d'abord configurer et connecter l'API pour gérer vos amis."
+  },
+  "optionsAntiTig": {
+    "message": "🛡️ Mode ANTI-TIG (Protection Boutique)"
   }
 }

@@ -1,18 +1,23 @@
 // background.js
 
-// background.js
-
-
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("refreshData", { periodInMinutes: 5 });
   console.log("Extension Logtime installée. Alarme créée.");
+  refreshAllData();
 
-  chrome.storage.local.get(['clusterTimes'], (data) => {
+  chrome.storage.local.get(['clusterTimes', 'isCoalitionWinner'], (data) => {
     if (!data.clusterTimes) {
       chrome.storage.local.set({ clusterTimes: {}, lastProcessedLocationId: 0 });
-      console.log("Initialisation Matrix (0 postes) terminée.");
     }
+    if (data.isCoalitionWinner === undefined) {
+      chrome.storage.local.set({ isCoalitionWinner: false });
+    }
+    console.log("Initialisation Matrix (0 postes) terminée.");
   });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  refreshAllData();
 });
 
 // Restaurer le badge au démarrage du navigateur
@@ -34,13 +39,16 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // Listener pour que le popup/options puisse demander un rafraîchissement manuel
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "refresh") {
-    refreshAllData().then(success => {
-      sendResponse({ status: success ? "success" : "error" });
+    refreshAllData(request.force || false).then(() => {
+      sendResponse({ status: "success" });
     });
-    return true; // async response
+    return true;
   }
-  if (request.action === "login") {
-    handleLogin().then(res => sendResponse(res));
+  if (request.action === "debug_storage") {
+    chrome.storage.local.get(null, (data) => {
+      console.log("[LT42] DEBUG STORAGE:", data);
+      sendResponse(data);
+    });
     return true;
   }
   if (request.action === "getOutstandingData") {
@@ -54,6 +62,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     })();
     return true; // Keep channel open for async response
+  }
+  if (request.action === "login") {
+    handleLogin().then(res => {
+      sendResponse(res);
+    }).catch(err => {
+      sendResponse({ status: "error", error: err.message });
+    });
+    return true;
+  }
+  if (request.action === "autoScrapeProfile") {
+    const url = `https://profile.intra.42.fr/users/${request.login}`;
+    chrome.tabs.create({ url, active: false }, (tab) => {
+      setTimeout(() => {
+        chrome.tabs.remove(tab.id);
+      }, 6000);
+    });
+    sendResponse({ status: "started" });
+    return true;
   }
 });
 
@@ -106,7 +132,13 @@ async function handleLogin() {
         campusName = userData.campus[0].name || '';
       }
 
-      await chrome.storage.local.set({ userAvatar, userCampus: campusName });
+      await chrome.storage.local.set({ 
+        userAvatar, 
+        userCampus: campusName,
+        userWallet: userData.wallet || 0,
+        userCoalitionColor: (userData.coalitions && userData.coalitions[0]) ? userData.coalitions[0].color : null,
+        userCoalitionLogo: (userData.coalitions && userData.coalitions[0]) ? userData.coalitions[0].image_url : null
+      });
     } else {
       throw new Error(`Utilisateur '${username}' introuvable.`);
     }
@@ -138,7 +170,11 @@ async function getValidToken() {
         })
       });
 
-      if (!res.ok) throw new Error("Auth failed");
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error(`[LT42] Token refresh failed: ${res.status} ${res.statusText}`, errText);
+        throw new Error("Auth failed");
+      }
       const resData = await res.json();
       const expire = (Date.now() / 1000) + resData.expires_in - 60;
       
@@ -155,7 +191,7 @@ async function getValidToken() {
   return null;
 }
 
-async function refreshAllData() {
+async function refreshAllData(force = false) {
   const currentToken = await getValidToken();
   if (!currentToken) return false;
 
@@ -168,42 +204,47 @@ async function refreshAllData() {
   let clusterTimes = storageData.clusterTimes || {};
   let lastProcessedLocationId = storageData.lastProcessedLocationId || 0;
   const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+
   // To keep the profile calendar accurate, we want at least 12 months of data.
   const twelveMonthsAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
   
   // Cache check: see if we have enough history
-  const cacheInfo = await chrome.storage.local.get(['cachedLocations', 'lastProcessedLocationId']);
+  const cacheInfo = await chrome.storage.local.get(['cachedLocations', 'lastProcessedLocationId', 'hasFetchedFullHistory']);
   const cachedLocs = cacheInfo.cachedLocations || [];
   const lastProcessedId = cacheInfo.lastProcessedLocationId || 0;
+  const hasFetchedFullHistory = cacheInfo.hasFetchedFullHistory || false;
   
-  // Find oldest location in cache
-  let oldestDate = now.getTime();
-  if (cachedLocs.length > 0) {
-    oldestDate = new Date(cachedLocs[cachedLocs.length-1].begin_at).getTime();
-  }
-  
-  // If no cache or oldest location is too recent (e.g. less than 6 months old), we fetch more
-  const needsHistory = (oldestDate > new Date(now.getTime() - (180 * 24 * 60 * 60 * 1000)).getTime());
-  const isFirstFetch = (lastProcessedId === 0) || needsHistory;
+  // Only deep fetch if we never did it before
+  const isFirstFetch = !hasFetchedFullHistory;
 
   let startObj;
   if (isFirstFetch) {
-    // On remonte sur 1 an si on n'a pas assez d'historique
     startObj = twelveMonthsAgo;
     console.log("🔄 Fetch approfondi Logtime : récupération de 1 an d'historique...");
+    await chrome.storage.local.set({ hasFetchedFullHistory: true });
   } else {
-    // Refresh normal : on récupère les 45 derniers jours pour assurer la continuité
     startObj = new Date(now.getTime() - (45 * 24 * 60 * 60 * 1000));
   }
-  // Fin : On injecte demain (Now + 24h)
   const endObj = new Date(now.getTime() + 86400000);
 
-  
+  // --- 0. Initialize missing keys & priority coalition check ---
+  let isCoalitionWinner = false;
+  let userCoalition = null;
+  try {
+    const current = await chrome.storage.local.get(['isCoalitionWinner', 'cachedCoalition']);
+    isCoalitionWinner = current.isCoalitionWinner || false;
+    userCoalition = current.cachedCoalition || null;
+  } catch (e) {
+    console.warn("[LT42] Early coalition check failed deeply:", e);
+  }
+
   const start = startObj.toISOString();
   const end = endObj.toISOString();
 
   try {
-    // 1. Fetch Logtime (paginé si premier fetch, sinon 1 seule page)
+    // 1. Fetch Logtime
     let allLocs = [];
     let page = 1;
     let hasMore = true;
@@ -213,128 +254,80 @@ async function refreshAllData() {
         headers: { 'Authorization': `Bearer ${currentToken}` }
       });
       if (!locsRes.ok) {
-        throw new Error(`Failed to fetch logtime: ${locsRes.status} ${await locsRes.text()}`);
+        console.error(`[LT42] Logtime fetch failed: ${locsRes.status} ${locsRes.statusText}`);
+        if (locsRes.status === 401) {
+          await chrome.storage.local.remove(['accessToken', 'tokenExpire']);
+          console.warn("[LT42] Access token invalidated (401). Will try to refresh next time.");
+        }
+        throw new Error(`Logtime fetch failed (${locsRes.status})`);
       }
       const pageLocs = await locsRes.json();
       if (Array.isArray(pageLocs) && pageLocs.length > 0) {
         allLocs = allLocs.concat(pageLocs);
         page++;
-        if (pageLocs.length < 100) {
-          hasMore = false;
-        } else {
-          await new Promise(r => setTimeout(r, 600)); // Rate limit
-        }
-      } else {
-        hasMore = false;
-      }
-    }
-    const newLocs = allLocs;
-    if (isFirstFetch) {
-      console.log(`✅ Premier fetch terminé : ${newLocs.length} sessions récupérées sur 1 an.`);
+        if (pageLocs.length < 100) hasMore = false;
+        else await new Promise(r => setTimeout(r, 600));
+      } else hasMore = false;
     }
 
-    // --- Merger avec le cache existant pour garder 12 mois de data ---
-    let cachedLocations = (await chrome.storage.local.get(['cachedLocations'])).cachedLocations || [];
-    
-    // Créer une map par ID pour dédoublonner
+    const { cachedLocations = [] } = await chrome.storage.local.get(['cachedLocations']);
     const locMap = {};
     cachedLocations.forEach(l => locMap[l.id] = l);
-    newLocs.forEach(l => locMap[l.id] = l);
+    allLocs.forEach(l => locMap[l.id] = l);
     
-    // Re-transformer en tableau et filtrer pour garder seulement les 12 derniers mois
-    const twelveMonthsAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).getTime();
-    let mergedLocs = Object.values(locMap).filter(l => {
-      const begin = new Date(l.begin_at).getTime();
-      return begin >= twelveMonthsAgo;
-    });
-
-    // Trier par date décroissante
+    let mergedLocs = Object.values(locMap).filter(l => new Date(l.begin_at).getTime() >= twelveMonthsAgo.getTime());
     mergedLocs.sort((a, b) => new Date(b.begin_at) - new Date(a.begin_at));
 
-    // --- Calculer le résumé mensuel pour le Profile ---
-    const monthlyLogtime = {}; // "Jan": minutes
+    const monthlyLogtime = {};
     const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     
     mergedLocs.forEach(l => {
-      const d = new Date(l.begin_at);
-      const monthLabel = MONTH_NAMES[d.getMonth()];
-      const duration = (l.end_at ? new Date(l.end_at) : new Date()) - new Date(l.begin_at);
-      const mins = Math.floor(duration / 60000);
-      monthlyLogtime[monthLabel] = (monthlyLogtime[monthLabel] || 0) + mins;
+      const s = new Date(l.begin_at).getTime();
+      const e = (l.end_at ? new Date(l.end_at) : new Date()).getTime();
+      let cur = new Date(new Date(s).getFullYear(), new Date(s).getMonth(), 1);
+      const lst = new Date(new Date(e).getFullYear(), new Date(e).getMonth(), 1);
+      while (cur <= lst) {
+        const mS = new Date(cur.getFullYear(), cur.getMonth(), 1).getTime();
+        const mE = new Date(cur.getFullYear(), cur.getMonth() + 1, 1).getTime();
+        const oS = Math.max(s, mS);
+        const oE = Math.min(e, mE);
+        if (oE > oS) {
+          const lbl = MONTH_NAMES[cur.getMonth()];
+          monthlyLogtime[lbl] = (monthlyLogtime[lbl] || 0) + Math.floor((oE - oS) / 60000);
+        }
+        cur.setMonth(cur.getMonth() + 1);
+      }
     });
     
-    await chrome.storage.local.set({ monthlyLogtime });
-    const locs = mergedLocs; 
-
-
-    // --- Matrix Live Tracking ---
+    // --- Matrix Live ---
     let activeSession = null;
     let maxId = lastProcessedLocationId;
+    mergedLocs.forEach(loc => {
+      if (loc.id <= lastProcessedLocationId) return;
+      if (loc.end_at !== null) {
+        const dM = Math.floor((new Date(loc.end_at) - new Date(loc.begin_at)) / 60000);
+        clusterTimes[loc.host] = (clusterTimes[loc.host] || 0) + dM;
+        if (loc.id > maxId) maxId = loc.id;
+      } else activeSession = { host: loc.host, begin_at: loc.begin_at };
+    });
 
-    if (Array.isArray(locs)) {
-      locs.forEach(loc => {
-        if (loc.id <= lastProcessedLocationId) return;
-
-        if (loc.end_at !== null) {
-          // Session terminée : on ajoute les minutes de façon permanente
-          const durationMins = Math.floor((new Date(loc.end_at) - new Date(loc.begin_at)) / 60000);
-          clusterTimes[loc.host] = (clusterTimes[loc.host] || 0) + durationMins;
-          if (loc.id > maxId) maxId = loc.id;
-        } else {
-          // Session active
-          activeSession = { host: loc.host, begin_at: loc.begin_at };
-        }
-      });
-    }
-
-    // Sleep gently to avoid hitting rate limit
     await new Promise(r => setTimeout(r, 600));
-    
-    // 2. Fetch Stats
     const statsRes = await fetch(`https://api.intra.42.fr/v2/users/${username}`, {
       headers: { 'Authorization': `Bearer ${currentToken}` }
     });
-    if (!statsRes.ok) {
-      throw new Error(`Failed to fetch stats: ${statsRes.status} ${await statsRes.text()}`);
-    }
-    const stats = await statsRes.json();
+    const stats = statsRes.ok ? await statsRes.json() : null;
     
-    // Store user avatar & campus from stats (so popup always has them)
-    if (stats && !stats.error) {
-      let userAvatar = null;
-      if (stats.image && stats.image.versions && stats.image.versions.small) {
-        userAvatar = stats.image.versions.small;
-      } else if (stats.image && stats.image.link) {
-        userAvatar = stats.image.link;
-      }
-      let campusName = '';
-      if (stats.campus && Array.isArray(stats.campus) && stats.campus.length > 0) {
-        campusName = stats.campus[0].name || '';
-      }
-      await chrome.storage.local.set({ userAvatar, userCampus: campusName });
-    }
-    // 2bis. Fetch Coalition
-    const coalRes = await fetch(`https://api.intra.42.fr/v2/users/${username}/coalitions`, {
-      headers: { 'Authorization': `Bearer ${currentToken}` }
-    }).catch(e => null);
-    
-    let userCoalition = null;
-    if (coalRes && coalRes.ok) {
-      try {
-        const coalData = await coalRes.json();
-        if (Array.isArray(coalData) && coalData.length > 0) {
-          userCoalition = coalData[0]; // Get primary coalition
-        }
-      } catch(e) {}
+    if (stats) {
+      let uAv = stats.image?.versions?.small || stats.image?.link;
+      let cNa = stats.campus?.[0]?.name || '';
+      await chrome.storage.local.set({ userAvatar: uAv, userCampus: cNa });
     }
 
-    // --- IMMEDIATE STORAGE OF PERSONAL DATA ---
-    // We store this immediately so the Popup can update its main UI 
-    // without waiting for the slow friends-refresh loop.
     await chrome.storage.local.set({
-      cachedLocations: locs,
-      cachedStats: stats && !stats.error ? stats : null,
+      cachedLocations: mergedLocs,
+      cachedStats: stats,
       cachedCoalition: userCoalition,
+      isCoalitionWinner: isCoalitionWinner,
       monthlyLogtime: monthlyLogtime,
       lastRefresh: Date.now(),
       clusterTimes: clusterTimes,
@@ -342,166 +335,144 @@ async function refreshAllData() {
       activeSession: activeSession
     });
 
-    // Load old cache to fallback if API is rate limited for friends
-    const currentCache = await chrome.storage.local.get(['cachedFriends', 'friendAvatars', 'enableFriendNotifs', 'notifFriends']);
-    const oldFriendsStats = currentCache.cachedFriends || {};
-    const friendAvatars = currentCache.friendAvatars || {};
-    const enableNotifs = currentCache.enableFriendNotifs || false;
-    const notifFriends = currentCache.notifFriends || [];
-
-    // 3. Update friends online count
+    // 3. Update friends
+    const { friendsList: activeFriends = [], cachedFriends: oldFriendsStats = {}, friendAvatars = {} } = await chrome.storage.local.get(['friendsList', 'cachedFriends', 'friendAvatars']);
     let onlineFriends = 0;
-    const friendsStats = {};
-    if (settings.friendsList) {
-      settings.friendsList.forEach(f => {
-        if (oldFriendsStats[f]) friendsStats[f] = oldFriendsStats[f];
-      });
-    }
+    const friendsStats = { ...oldFriendsStats };
 
-    if (settings.friendsList && settings.friendsList.length > 0) {
-      for (const friend of settings.friendsList) {
-        // Indicate to UI that we are refreshing this specific friend
-        friendsStats[friend] = { ...(friendsStats[friend] || {}), refreshing: true };
-        await chrome.storage.local.set({ cachedFriends: friendsStats });
-
+    if (activeFriends.length > 0) {
+      for (const friend of activeFriends) {
+        const fs = { ...(friendsStats[friend] || {}) };
         try {
-          // Sleep to respect 42 API rate limit
-          await new Promise(r => setTimeout(r, 600));
-
-          // Check if we need to re-fetch the friend's profile (avatar/level)
-          // We fetch if: avatar is missing/old OR if level is missing/0
           const cachedAvatar = friendAvatars[friend];
-          const avatarFresh = cachedAvatar && cachedAvatar.fetchedAt && (Date.now() - cachedAvatar.fetchedAt < 86400000); // 24h
-          const levelMissing = !oldFriendsStats[friend] || !oldFriendsStats[friend].level || oldFriendsStats[friend].level === 0;
+          const avatarFresh = cachedAvatar && cachedAvatar.fetchedAt && (Date.now() - cachedAvatar.fetchedAt < 86400000);
+          const needsProf = force || !avatarFresh || !fs.level || fs.wallet === undefined || !fs.coalitionColor || !fs.titles?.length;
 
-          let friendProfilePromise = null;
-          if (!avatarFresh || levelMissing) {
-            friendProfilePromise = fetch(`https://api.intra.42.fr/v2/users/${friend}`, {
-              headers: { 'Authorization': `Bearer ${currentToken}` }
-            }).catch(e => null);
-          }
+          // Only sleep before API call to respect 42 rate limits (500ms)
+          await new Promise(r => setTimeout(r, 500));
 
-          // Friends: we only need the current month's logtime for the popup.
-          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-          // Always fetch locations for online status + current month logtime
-          const friendLocsRes = await fetch(`https://api.intra.42.fr/v2/users/${friend}/locations?range[begin_at]=${monthStart},${end}&per_page=100`, {
-            headers: { 'Authorization': `Bearer ${currentToken}` }
-          }).catch(e => null);
-
-
-          // Wait for profile only if we launched it
-          const friendProfileRes = friendProfilePromise ? await friendProfilePromise : null;
-
-          if (!friendLocsRes || !friendLocsRes.ok) {
-            console.warn(`Could not fetch locs for ${friend}, fallback to cache`);
-            if (oldFriendsStats[friend]) {
-              friendsStats[friend] = oldFriendsStats[friend];
-              if (oldFriendsStats[friend].active) onlineFriends++;
-            } else {
-              delete friendsStats[friend];
-            }
-            await chrome.storage.local.set({ cachedFriends: friendsStats });
-            continue;
-          }
+          // 1. Fetch Location
+          const nowD = new Date();
+          const firstDay = new Date(nowD.getFullYear(), nowD.getMonth(), 1).toISOString();
+          const locR = await fetch(`https://api.intra.42.fr/v2/users/${friend}/locations?range[begin_at]=${firstDay},${nowD.toISOString()}&per_page=100`, { 
+            headers: { Authorization: `Bearer ${currentToken}` } 
+          }).catch(() => null);
           
-          const friendLocs = await friendLocsRes.json();
-          let friendTotalMs = 0;
-          const currentMonth = now.getMonth();
-          const currentYear = now.getFullYear();
+          if (locR?.ok) {
+            const locs = await locR.json();
+            fs.active = (locs.length > 0 && locs[0].end_at === null) ? locs[0].host : null;
+            if (locs.length > 0) fs.locs = locs; // Save to compute session time in UI
+            if (fs.active) onlineFriends++;
 
-          if (Array.isArray(friendLocs)) {
-            friendLocs.forEach(l => {
-              const s = new Date(l.begin_at);
-              // Safety filter (redundant with API range but good for crossing boundaries)
-              if (s.getMonth() === currentMonth && s.getFullYear() === currentYear) {
-                friendTotalMs += ((l.end_at ? new Date(l.end_at) : new Date()) - s);
-              }
+            let totalFriendMs = 0;
+            const mS = new Date(nowD.getFullYear(), nowD.getMonth(), 1).getTime();
+            const mE = new Date(nowD.getFullYear(), nowD.getMonth() + 1, 1).getTime();
+            locs.forEach(l => {
+              const s = new Date(l.begin_at).getTime();
+              const e = (l.end_at ? new Date(l.end_at) : Date.now()).getTime();
+              const oS = Math.max(s, mS);
+              const oE = Math.min(e, mE);
+              if (oE > oS) totalFriendMs += (oE - oS);
             });
+            fs.totalMs = totalFriendMs;
+          } else if (locR?.status === 429) {
+            console.warn(`[LT42] Rate limited (429) while syncing ${friend}. Skipping...`);
+            continue; // Stop for this friend
           }
 
-          const activeFriendSession = Array.isArray(friendLocs) && friendLocs.find(l => l.end_at === null);
-          
-          // Avatar: use fresh profile data or cache
-          let avatarUrl = cachedAvatar ? cachedAvatar.url : null;
-          let level = (oldFriendsStats[friend] && oldFriendsStats[friend].level) ? oldFriendsStats[friend].level : 0;
-          if (friendProfileRes && friendProfileRes.ok) {
-            try {
-              const friendProfile = await friendProfileRes.json();
-              if (friendProfile && friendProfile.image && friendProfile.image.versions && friendProfile.image.versions.small) {
-                avatarUrl = friendProfile.image.versions.small;
-              } else if (friendProfile && friendProfile.image && friendProfile.image.link) {
-                avatarUrl = friendProfile.image.link;
+          // 2. Fetch Profile if needed
+          if (needsProf) {
+            await new Promise(r => setTimeout(r, 500)); // Respect 200-500ms rate limits
+            const profR = await fetch(`https://api.intra.42.fr/v2/users/${friend}`, { 
+              headers: { Authorization: `Bearer ${currentToken}` } 
+            }).catch(() => null);
+            
+            if (profR?.ok) {
+              const p = await profR.json();
+              fs.wallet = p.wallet || 0;
+              fs.level = p.cursus_users?.find(cu => cu.cursus_id === 21)?.level || fs.level || 0;
+              // Filter out titles that contain the login (vanity titles like "Awesome %login")
+              if (!fs.titles || fs.titles.length === 0) {
+                fs.titles = (p.titles || [])
+                  .map(t => t.name.replace('%login', friend))
+                  .filter(name => !name.toLowerCase().includes(friend.toLowerCase()));
               }
-              // Get level from 42cursus
-              if (friendProfile.cursus_users) {
-                const cursus = friendProfile.cursus_users.find(cu => cu.cursus.id === 21 || cu.cursus.name === "42cursus");
-                if (cursus) level = cursus.level;
+              if (p.coalitions?.length > 0) {
+                fs.coalitionColor = p.coalitions[0].color;
+                fs.coalitionLogo = p.coalitions[0].image_url;
               }
-              friendAvatars[friend] = { url: avatarUrl, fetchedAt: Date.now() };
-            } catch(e) { console.warn("Error parsing profile info", friend); }
-          }
-
-          // Detect online transition for notifications
-          const wasOffline = !oldFriendsStats[friend] || !oldFriendsStats[friend].active;
-          const isNowOnline = !!activeFriendSession;
-
-          friendsStats[friend] = { 
-            active: activeFriendSession ? activeFriendSession.host : null, 
-            totalMs: friendTotalMs,
-            avatar: avatarUrl,
-            level: level
-          };
-          if (activeFriendSession) onlineFriends++;
-
-
-          // Send notification if friend just came online
-          if (wasOffline && isNowOnline && enableNotifs && notifFriends.includes(friend)) {
-            try {
-              chrome.notifications.create(`friend-online-${friend}-${Date.now()}`, {
-                type: "basic",
-                iconUrl: avatarUrl || "icon128.png",
-                title: chrome.i18n.getMessage("notifTitle") || "42 Logtime",
-                message: chrome.i18n.getMessage("notifFriendOnline", [friend, activeFriendSession.host]) || `${friend} just connected!`
-              });
-            } catch(notifErr) {
-              console.warn("Failed to send notification for", friend, notifErr);
+              if (p.image?.versions?.small) fs.avatar = p.image.versions.small;
             }
           }
 
-          await chrome.storage.local.set({ cachedFriends: friendsStats });
-        } catch(e) { 
-          console.warn("Error API friend", friend); 
-          if (oldFriendsStats[friend]) {
-             friendsStats[friend] = oldFriendsStats[friend];
-             if (oldFriendsStats[friend].active) onlineFriends++;
-          } else {
-             delete friendsStats[friend];
+          // 3. Fetch Coalition if explicitly missing
+          if (needsProf && (!fs.coalitionColor || !fs.coalitionLogo)) {
+            await new Promise(r => setTimeout(r, 500));
+            const cR = await fetch(`https://api.intra.42.fr/v2/users/${friend}/coalitions`, { 
+              headers: { Authorization: `Bearer ${currentToken}` } 
+            }).catch(() => null);
+            if (cR?.ok) {
+              const cD = await cR.json();
+              if (cD.length > 0) {
+                fs.coalitionColor = cD[0].color;
+                fs.coalitionLogo = cD[0].image_url;
+              } else {
+                fs.coalitionColor = "#888"; // default if they have no coalition
+              }
+            }
           }
-          await chrome.storage.local.set({ cachedFriends: friendsStats });
-        }
+          friendsStats[friend] = fs;
+        } catch(e) { console.warn("Friend sync fail", friend, e); }
       }
+      await chrome.storage.local.set({ cachedFriends: friendsStats });
     }
 
-    // Update badge with number of online friends
-    if (onlineFriends > 0) {
-      chrome.action.setBadgeText({ text: onlineFriends.toString() });
-      chrome.action.setBadgeBackgroundColor({ color: '#00b894' });
-    } else {
-      chrome.action.setBadgeText({ text: '0' });
-      chrome.action.setBadgeBackgroundColor({ color: '#636e72' });
-    }
+    // --- Update Winning Coalition Globally (Once per hour max) ---
+    try {
+      const wData = await chrome.storage.local.get(['myWinningCoalitionTimestamp']);
+      const lastW = wData.myWinningCoalitionTimestamp || 0;
+      if (Date.now() - lastW > 3600000 || forceRefresh) {
+         const meRes = await fetch(`https://api.intra.42.fr/v2/users/${username}`, {
+           headers: { Authorization: `Bearer ${currentToken}` }
+         });
+         if (meRes.ok) {
+            const meData = await meRes.json();
+            const campusId = meData.campus && meData.campus.length > 0 ? meData.campus[0].id : 1;
+            
+            await new Promise(r => setTimeout(r, 500));
+            const bRes = await fetch(`https://api.intra.42.fr/v2/blocs?filter[campus_id]=${campusId}`, {
+              headers: { Authorization: `Bearer ${currentToken}` }
+            });
+            if (bRes.ok) {
+               const blocs = await bRes.json();
+               if (blocs.length > 0) {
+                   await new Promise(r => setTimeout(r, 500));
+                   const cbRes = await fetch(`https://api.intra.42.fr/v2/blocs/${blocs[0].id}/coalitions`, {
+                     headers: { Authorization: `Bearer ${currentToken}` }
+                   });
+                   if (cbRes.ok) {
+                       const cbData = await cbRes.json();
+                       cbData.sort((a,b) => b.score - a.score);
+                       if (cbData.length > 0) {
+                           await chrome.storage.local.set({ 
+                              myWinningCoalitionColor: cbData[0].color,
+                              myWinningCoalitionTimestamp: Date.now()
+                           });
+                       }
+                   }
+               }
+            }
+         }
+      }
+    } catch (e) { console.warn("Winner sync error", e); }
 
-    // Final Sync of all data
-    await chrome.storage.local.set({
-      cachedFriends: friendsStats,
-      friendAvatars: friendAvatars
-    });
-
+    const badgeCount = onlineFriends.toString();
+    chrome.action.setBadgeText({ text: badgeCount });
+    chrome.action.setBadgeBackgroundColor({ color: onlineFriends > 0 ? '#00b894' : '#636e72' });
 
     return true;
   } catch (err) {
-    console.error("Erreur lors du refresh:", err);
+    console.error("Refresh fail:", err);
     return false;
   }
 }
